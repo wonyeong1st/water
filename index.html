@@ -1,0 +1,1691 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title> </title>
+  <link rel="manifest" href="manifest.json">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-4">
+
+<!-- Intro Title Overlay -->
+<div id="introTitle" class="fixed inset-0 flex items-center justify-center bg-gray-100 z-50">
+  <div class="text-center transition-opacity duration-500 opacity-100">
+    <div class="text-lg text-gray-600">생수 입출고 관리</div>
+    <div class="text-2xl font-extrabold mt-1">(주) 신성에프앤디</div>
+  </div>
+</div>
+<style>
+  
+  /* Mobile-friendly tap feedback */
+  .tap-btn {
+    transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.08s ease;
+  }
+  .tap-btn:active {
+    transform: scale(0.96);
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.25);
+    filter: brightness(0.95);
+  }
+  /* Global JS tap-active effect */
+  .tap-active{
+    transform: scale(0.97);
+    filter: brightness(0.96);
+  }
+
+  /* STEP1: long-press visual */
+  .long-press-active {
+    transform: scale(0.98);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    background-color: #f1f5f9;
+  }
+
+  /* long-press menu */
+  .slip-action-menu {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+  }
+  .slip-action-box {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    width: 80%;
+    max-width: 320px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+  }
+
+    /* 🔒 안드로이드 텍스트 선택 방지 (long-press 전용) */
+  .no-select{
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: none; /* pointer 이벤트에서 long-press 허용 */
+  }
+</style>
+<script>
+  // prevent native context menu globally on cards
+  document.addEventListener('contextmenu', function(e){
+    if (e.target.closest('.no-select')) {
+      e.preventDefault();
+      return false;
+    }
+  }, { passive:false });
+</script>
+  <div id="appHeader" style="display:none">
+  <h1 class="mb-4 text-center">
+    <div class="text-lg">입출고 관리</div>
+    <div class="text-2xl font-bold">(주) 신성에프앤디</div>
+  </h1>
+
+  <!-- Top bar: totals -->
+  <div class="max-w-3xl mx-auto mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+    <div class="bg-white rounded-2xl shadow p-4 text-center">
+      <div class="text-sm text-gray-500">개인 재고 (18.9L)</div>
+      <div id="myStock189" class="text-4xl font-extrabold">0</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-4 text-right">
+      <div class="text-sm text-gray-500 text-center">명성 정산 누적</div>
+      <div id="sumM" class="text-2xl font-extrabold">0원</div>
+    </div>
+    <div class="bg-white rounded-2xl shadow p-4 text-right">
+      <div class="text-sm text-gray-500 text-center">음봉 정산 누적</div>
+      <div id="sumE" class="text-2xl font-extrabold">0원</div>
+    </div>
+  </div>
+
+  <!-- Main nav -->
+  <div class="max-w-3xl mx-auto mb-4 grid grid-cols-2 gap-3">
+    <button class="tap-btn rounded-xl bg-red-600 text-white font-bold py-3" onclick="tap(); showShippingWith('명성')">🚚 명성 출고</button>
+    <button class="tap-btn rounded-xl bg-blue-600 text-white font-bold py-3" onclick="tap(); showShippingWith('음봉')">🚚 음봉 출고</button>
+    <button class="tap-btn rounded-xl bg-slate-700 text-white font-bold py-3" onclick="tap(); show('hist_m')">📦 명성 조회</button>
+    <button class="tap-btn rounded-xl bg-slate-800 text-white font-bold py-3" onclick="tap(); show('hist_e')">📦 음봉 조회</button>
+    <button class="tap-btn rounded-xl bg-emerald-600 text-white font-bold py-3" onclick="tap(); show('inbound')">📥 입고/반납</button>
+    <button class="tap-btn rounded-xl bg-orange-500 text-white font-bold py-3" onclick="tap(); show('settings')">⚙ 설정</button>
+  </div>
+</div>
+
+  <div id="screen" class="max-w-3xl mx-auto"></div>
+
+  <script>
+/************************************************************
+ * STEP 3-2 (1차): 구조 정렬 — 동작/화면 변경 없음
+ * 목적: 이후 수정 시 안정성 확보를 위한 구역 표시만 추가
+ * 범위: 주석 추가 ONLY (코드 이동/삭제/로직 변경 없음)
+ ************************************************************/
+
+// ===== 섹션 목차 =====
+// 1) Utils (진동/사운드/날짜/저장)
+// 2) Storage Keys + Defaults
+// 3) Global State (런타임 상태)
+// 4) Navigation / Routing
+// 5) Screens (Home / Shipping / Inbound / History / Settings)
+// 6) Gestures (Long-press 등)
+// =====================
+
+/********************
+ * 1) Utils (진동/사운드/날짜/저장)
+ ********************/
+// haptic + click feedback
+  // haptic + click sound feedback
+  let __audioCtx;
+  function tap(){
+    try{
+      // mark manual tap to avoid double-fire
+      window.__lastTapAt = Date.now();
+      if (navigator.vibrate) navigator.vibrate(20);
+      if (!__audioCtx) __audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (__audioCtx.state === 'suspended') __audioCtx.resume();
+      const o = __audioCtx.createOscillator();
+      const g = __audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.value = 320;
+      g.gain.value = 0.06;
+      o.connect(g); g.connect(__audioCtx.destination);
+      o.start();
+      o.stop(__audioCtx.currentTime + 0.05);
+    }catch(e){}
+  }
+
+  // Mobile: focus on number input should select the whole value for fast overwrite
+  function bindAutoSelectInput(inp){
+    if (!inp || inp.__autoSelectBound) return;
+    inp.__autoSelectBound = true;
+
+    const selectAll = ()=>{
+      try{
+        // On Android, selection often works only after the keyboard is up
+        setTimeout(()=>{
+          try{ inp.focus(); }catch(e){}
+          try{ inp.select(); }catch(e){}
+          try{ inp.setSelectionRange(0, String(inp.value||'').length); }catch(e){}
+        }, 0);
+      }catch(e){}
+    };
+
+    inp.addEventListener('focus', selectAll);
+    inp.addEventListener('click', selectAll);
+  }
+
+  // GLOBAL: auto haptic+sound for all buttons (safe, no double)
+  document.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button');
+    if (!btn || btn.disabled) return;
+    // avoid double-fire if tap() already called inline
+    if (window.__lastTapAt && Date.now() - window.__lastTapAt < 120) return;
+    tap();
+  }, { passive:true });
+
+  // STEP2: gesture helper (future split candidate)
+  /********************
+ * 6) Gestures (Long-press 등)
+ ********************/
+function bindLongPress(el, onLong){
+    let timer;
+    el.addEventListener('pointerdown', (e)=>{
+      e.preventDefault();
+      timer = setTimeout(()=>{
+        tap();
+        el.classList.add('long-press-active');
+        onLong();
+      }, 550);
+    });
+    ['pointerup','pointerleave','pointercancel'].forEach(ev=>{
+      el.addEventListener(ev, ()=>{
+        clearTimeout(timer);
+        el.classList.remove('long-press-active');
+      });
+    });
+  }
+
+  /********************
+ * 2) Storage Keys + Defaults
+ ********************/
+  const KEYS = {
+    items: 'items',
+    outgo: 'outgoRecords',
+    inbound: 'inboundRecords',
+    myStock: 'myStock',
+    containerHeld: 'containerHeld',
+    settlement: 'settlement',
+    personalRate: 'personalRate189',
+    truckSize: 'truckSize864'
+  };
+
+  const DEFAULT_ITEMS = [
+    { name:'18.9L', myeongseong:0, eumbong:1800, lock:true },
+    { name:'2.0L', myeongseong:2000, eumbong:1850 },
+    { name:'500ml', myeongseong:2150, eumbong:2600 },
+    { name:'330ml', myeongseong:2600, eumbong:2508 },
+    { name:'1.0L (12개)', myeongseong:2530, eumbong:2530 },
+    { name:'종이컵(6.5oz)', myeongseong:8100, eumbong:8800 },
+    { name:'봉투컵', myeongseong:13000, eumbong:0 },
+    { name:'(동원)13L', myeongseong:2200, eumbong:0 }
+  ];
+
+  const CONTAINER_TYPES = [
+    { key:'189_crate', label:'18.9L 크레이트' },
+    { key:'189_empty', label:'18.9L 빈통' },
+    { key:'13_crate',  label:'13L 크레이트' },
+    { key:'13_empty',  label:'13L 빈통' }
+  ];
+
+  function loadJSON(key, fallback) {
+    try {
+      const v = localStorage.getItem(key);
+      return v ? JSON.parse(v) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  function saveJSON(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
+  function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
+  // Local date (YYYY-MM-DD) without UTC shift
+  function toLocalISO(d){
+    const x = new Date(d.getTime() - d.getTimezoneOffset()*60000);
+    return x.toISOString().slice(0,10);
+  }
+  function todayISO(){ return toLocalISO(new Date()); }
+  function uid(){ return Date.now() + Math.floor(Math.random()*1000); }
+  function money(n){ return (num(n)).toLocaleString() + '원'; }
+
+  /********************
+ * 3) Global State (런타임 상태)
+ ********************/
+// state
+  let items = loadJSON(KEYS.items, DEFAULT_ITEMS);
+  // STEP 3: 전표 수정용 상태
+  let editingRecord = null;
+  let outgoRecords = loadJSON(KEYS.outgo, []);
+  let inboundRecords = loadJSON(KEYS.inbound, []);
+  let myStock = loadJSON(KEYS.myStock, { '18.9L': 0 });
+  let containerHeld = loadJSON(KEYS.containerHeld, { 명성:{}, 음봉:{} });
+  let settlement = loadJSON(KEYS.settlement, { myeong:0, eumbong:0 });
+  let personalRate = num(localStorage.getItem(KEYS.personalRate) || 1800);
+  let truckSize = num(localStorage.getItem(KEYS.truckSize) || 864);
+
+  // ensure containerHeld structure
+  for (const wh of ['명성','음봉']) {
+    containerHeld[wh] = containerHeld[wh] || {};
+    for (const t of CONTAINER_TYPES) if (containerHeld[wh][t.key] === undefined) containerHeld[wh][t.key] = 0;
+  }
+
+  // ensure 18.9L exists
+  if (!items.find(x => x.name === '18.9L')) {
+    items.unshift(DEFAULT_ITEMS[0]);
+    saveJSON(KEYS.items, items);
+  }
+
+  function syncHeader(){
+    document.getElementById('sumM').innerText = money(settlement.myeong);
+    document.getElementById('sumE').innerText = money(settlement.eumbong);
+    document.getElementById('myStock189').innerText = (myStock['18.9L'] || 0);
+  }
+
+  // Settings: settlement reset helpers (per warehouse)
+  function resetSettlementM(){
+    if (!confirm('명성 정산만 0으로 초기화 할까요? 출고/입고 기록은 유지됩니다')) return;
+    settlement.myeong = 0;
+    saveJSON(KEYS.settlement, settlement);
+    syncHeader();
+    alert('명성 정산 누적을 0으로 초기화했습니다.');
+  }
+
+  function resetSettlementE(){
+    if (!confirm('음봉 정산만 0으로 초기화 할까요? 출고/입고 기록은 유지됩니다')) return;
+    settlement.eumbong = 0;
+    saveJSON(KEYS.settlement, settlement);
+    syncHeader();
+    alert('음봉 정산 누적을 0으로 초기화했습니다.');
+  }
+
+  /********************
+ * 5) Screens
+ ********************/
+  /********************
+ * 4) Navigation / Routing
+ * - show()
+ * - showShippingWith()
+ * - history / popstate
+ ********************/
+function show(name){
+    // 뒤로가기 히스토리 처리 (메인 제외)
+    if (name !== 'home') {
+      history.pushState({ screen: name }, '', '#'+name);
+    }
+    // STEP 2: 메인 화면이 아닐 때 상단 헤더 숨김
+    const header = document.getElementById('appHeader');
+    if (header) header.style.display = (name === 'home') ? 'block' : 'none';
+
+    if (name === 'home') return renderHome();
+    if (name === 'shipping') return renderShipping();
+    if (name === 'inbound') return renderInbound();
+    if (name === 'hist_m') return renderHistory('명성');
+    if (name === 'hist_e') return renderHistory('음봉');
+    if (name === 'inbound_hist') return renderInboundHistory();
+    if (name === 'settings') return renderSettings();
+  }
+
+  function showShippingWith(wh){
+    // 출고 진입은 반드시 show('shipping')을 거치게 함
+    show('shipping');
+    setTimeout(() => {
+      const btn = document.querySelector(`.ship-wh-btn[data-wh="${wh}"]`);
+      if (btn) btn.click();
+    }, 0);
+  }
+
+  function __show_placeholder__(){
+    if (name === 'home') return renderHome();
+    if (name === 'shipping') return renderShipping();
+    if (name === 'inbound') return renderInbound();
+    if (name === 'hist_m') return renderHistory('명성');
+    if (name === 'hist_e') return renderHistory('음봉');
+    if (name === 'settings') return renderSettings();
+  }
+
+  function renderHome(){
+    const el = document.getElementById('screen');
+    el.innerHTML = `
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-white rounded-2xl shadow p-4">
+          <div class="text-sm text-gray-500 text-center">개인 재고 (18.9L)</div>
+          <div class="text-5xl font-extrabold mt-1 text-center">${myStock['18.9L'] || 0}</div>
+          <div class="text-sm text-gray-500 mt-2">명성에서 18.9L를 출고하면 개인 재고가 자동 차감됩니다.</div>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-4">
+          <div class="font-bold mb-2">공병/크레이트 보유 (명성 기준)</div>
+          <div class="grid grid-cols-1 gap-2 text-sm">
+            ${CONTAINER_TYPES.map(t => `
+              <div class="flex justify-between">
+                <span>${t.label}</span>
+                <span class="font-extrabold">${containerHeld['명성'][t.key] || 0}</span>
+              </div>`).join('')}
+          </div>
+          <div class="text-xs text-gray-400 mt-2">※ 음봉 창고 수량은 입고/반납 메뉴에서 확인</div>
+        </div>
+      </div>
+
+      <div class="mt-4 bg-white rounded-2xl shadow p-4">
+        <div class="font-bold mb-3">빠른 실행</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <button class="tap-btn rounded-2xl bg-red-600 text-white font-extrabold py-6 text-xl shadow hover:scale-[1.02] transition" onclick="tap(); showShippingWith('명성')">🚚 명성 출고</button>
+          <button class="tap-btn rounded-2xl bg-blue-600 text-white font-extrabold py-6 text-xl shadow hover:scale-[1.02] transition" onclick="tap(); showShippingWith('음봉')">🚚 음봉 출고</button>
+        </div>
+      </div>
+    `;
+  }
+
+  /********************
+   * Shipping (출고)
+   ********************/
+  function renderShipping(){
+    const el = document.getElementById('screen');
+    el.innerHTML = `
+      <div class="bg-white rounded-2xl shadow p-4 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="text-xl font-extrabold">🚚 출고</div>
+            ${editingRecord ? `<span class=\"px-2 py-0.5 rounded-full bg-yellow-200 text-yellow-800 text-xs font-extrabold\">수정 중</span>` : ``}
+          </div>
+          <div class="text-sm text-gray-500">날짜는 기본 오늘, 필요 시 과거로 변경</div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label class="text-sm font-semibold">창고</label>
+            <div class="flex gap-2" id="shipWarehouseWrap">
+              <button data-wh="명성" class="ship-wh-btn flex-1 rounded-xl bg-rose-200 text-rose-900 font-extrabold py-2 border-4 border-rose-500">명성</button>
+              <button data-wh="음봉" class="ship-wh-btn flex-1 rounded-xl bg-sky-200 text-sky-900 font-extrabold py-2 border-2 border-transparent">음봉</button>
+            </div>
+          </div>
+          <div>
+            <label class="text-sm font-semibold">날짜</label>
+            <input id="shipDate" type="date" class="w-full border p-2 rounded-xl bg-gray-50" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">정렬/계산</label>
+            <div class="text-sm text-gray-600 bg-gray-50 border rounded-xl p-2">
+              명성 18.9L 단가는 0원 (개인재고 차감)
+            </div>
+          </div>
+        </div>
+
+        <div class="border rounded-2xl p-3 bg-gray-50">
+          <div class="font-bold mb-2">출고 수량 입력</div>
+          <div id="shipItems" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+        </div>
+
+        <div class="border rounded-2xl p-3 bg-gray-50">
+          <div class="font-bold mb-2">공병/크레이트 수거 (선택)
+            <span class="text-sm text-gray-500 font-normal">배송하면서 고객에게서 받은 크레이트/빈통을 기록 (불균형 가능)</span>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3" id="collectBoxes"></div>
+        </div>
+
+        <div class="flex items-center justify-between bg-white border rounded-2xl p-4">
+          <div class="font-bold">총 금액</div>
+          <div id="shipTotal" class="text-2xl font-extrabold text-blue-600">0원</div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <button id="shipSave" class="rounded-2xl bg-red-600 text-white font-extrabold py-4 shadow">저장</button>
+          <button id="shipClear" class="rounded-2xl bg-gray-700 text-white font-bold py-4 shadow">입력 초기화</button>
+        </div>
+
+        <div class="text-sm text-gray-500">
+          저장 시 규칙: (1) 명성 출고의 18.9L는 개인 재고에서 차감되고 정산 금액에는 반영되지 않습니다. (2) 명성 출고의 나머지 품목은 명성 정산에 누적됩니다. (3) 음봉 출고는 음봉 단가로 음봉 정산에 누적됩니다.
+        </div>
+      </div>
+    `;
+
+    let selectedWarehouse = '명성';
+
+    const whButtons = document.querySelectorAll('.ship-wh-btn');
+
+    function applyWarehouseStylesButtonsOnly(){
+      whButtons.forEach(b => {
+        b.classList.remove('border-4','border-rose-500','border-sky-500','shadow-lg','scale-95');
+        b.classList.add('border-2','border-transparent','shadow','transition','duration-150');
+        const chk = b.querySelector('.wh-check');
+        if (chk) chk.remove();
+      });
+      const active = Array.from(whButtons).find(b => b.dataset.wh === selectedWarehouse);
+      if (active) {
+        active.classList.remove('border-2','border-transparent');
+        active.classList.add('border-4','shadow-lg','scale-95');
+        active.classList.add(selectedWarehouse === '명성' ? 'border-rose-500' : 'border-sky-500');
+        const span = document.createElement('span');
+        span.className = 'wh-check ml-2 text-lg font-extrabold';
+        span.innerText = '✓';
+        active.appendChild(span);
+      }
+    }
+
+    function applyWarehouseStyles(){
+      applyWarehouseStylesButtonsOnly();
+      if (!shipItems) return;
+      shipItems.querySelectorAll('input[type="number"]').forEach(inp => {
+        inp.classList.remove('border-rose-400','border-sky-400');
+        inp.classList.add(selectedWarehouse === '명성' ? 'border-rose-400' : 'border-sky-400');
+      });
+      const totalEl = document.getElementById('shipTotal');
+      totalEl.classList.remove('text-rose-600','text-sky-600');
+      totalEl.classList.add(selectedWarehouse === '명성' ? 'text-rose-600' : 'text-sky-600');
+    }
+
+    whButtons.forEach(btn => {
+      btn.onclick = () => {
+        selectedWarehouse = btn.dataset.wh;
+        applyWarehouseStyles();
+        // ✏ 전표 수정 모드: 수량/수거 값 복원
+    if (editingRecord) {
+      // 출고 품목 수량 복원
+      shipItems.querySelectorAll('input[data-idx]').forEach(inp => {
+        const idx = Number(inp.dataset.idx);
+        const name = items[idx].name;
+        const found = (editingRecord.items || []).find(x => x.name === name);
+        if (found) inp.value = found.qty;
+      });
+      // 수거 공병/크레이트 복원
+      collectBoxes.querySelectorAll('input[data-ct]').forEach(inp => {
+        const k = inp.dataset.ct;
+        if (editingRecord.collected && editingRecord.collected[k] !== undefined) {
+          inp.value = editingRecord.collected[k];
+        }
+      });
+      applyWarehouseStyles();
+    }
+
+    calcShipTotal();
+      };
+    });
+
+    // NOTE: shipItems is not built yet here, so only apply button highlight
+    applyWarehouseStylesButtonsOnly();
+
+    // 날짜 기본값
+    document.getElementById('shipDate').value = todayISO();
+
+    // ✏ 전표 수정 모드일 경우: 날짜/창고만 우선 세팅
+    if (editingRecord) {
+      selectedWarehouse = editingRecord.warehouse;
+      document.getElementById('shipDate').value = editingRecord.date;
+    }
+
+    const shipItems = document.getElementById('shipItems');
+    shipItems.innerHTML = items.map((it, idx) => `
+        <div class="bg-white border rounded-2xl p-3 flex items-center justify-between gap-2">
+          <div>
+            <div class="font-bold">${it.name}</div>
+            <div class="text-xs text-gray-500">명성: ${num(it.myeongseong)} / 음봉: ${num(it.eumbong)}</div>
+          </div>
+          <div class="flex items-center gap-1">
+            <button class="qty-btn px-3 py-2 rounded-lg bg-gray-200 font-bold" data-step="-1" data-idx="${idx}">−</button>
+            <input data-idx="${idx}" type="number" class="w-20 border p-2 rounded-xl text-right" value="0" />
+            <button class="qty-btn px-3 py-2 rounded-lg bg-gray-200 font-bold" data-step="1" data-idx="${idx}">+</button>
+          </div>
+        </div>`).join('');
+
+    const collectBoxes = document.getElementById('collectBoxes');
+    collectBoxes.innerHTML = CONTAINER_TYPES.map(t => `
+      <div class="bg-white border rounded-2xl p-3 flex items-center justify-between gap-2">
+        <div class="font-bold">${t.label}</div>
+        <div class="flex items-center gap-1">
+          <button class="qty-btn px-3 py-2 rounded-lg bg-gray-200 font-bold" data-step="-1" data-ct="${t.key}">−</button>
+          <input data-ct="${t.key}" type="number" class="w-20 border p-2 rounded-xl text-right" value="0" />
+          <button class="qty-btn px-3 py-2 rounded-lg bg-gray-200 font-bold" data-step="1" data-ct="${t.key}">+</button>
+        </div>
+      </div>`).join('');
+
+    // ✏ 전표 수정 모드: 실제 입력값 복원 (DOM 생성 이후)
+    if (editingRecord) {
+      // 출고 품목 수량 복원
+      shipItems.querySelectorAll('input[data-idx]').forEach(inp => {
+        const idx = Number(inp.dataset.idx);
+        const name = items[idx].name;
+        const found = (editingRecord.items || []).find(x => x.name === name);
+        if (found) inp.value = found.qty;
+      });
+      // 수거 공병/크레이트 복원
+      collectBoxes.querySelectorAll('input[data-ct]').forEach(inp => {
+        const k = inp.dataset.ct;
+        if (editingRecord.collected && editingRecord.collected[k] !== undefined) {
+          inp.value = editingRecord.collected[k];
+        }
+      });
+    }
+
+
+    function calcShipTotal(){
+      let total = 0;
+      shipItems.querySelectorAll('input[type="number"]').forEach(inp => {
+        const idx = Number(inp.dataset.idx);
+        const q = num(inp.value);
+        if (q === 0) return;
+        const it = items[idx];
+        let price = selectedWarehouse === '명성' ? num(it.myeongseong) : num(it.eumbong);
+        if (selectedWarehouse === '명성' && it.name === '18.9L') price = 0;
+        total += q * price;
+      });
+      document.getElementById('shipTotal').innerText = money(total);
+      return total;
+    }
+
+    shipItems.addEventListener('input', calcShipTotal);
+
+    // 숫자 입력칸: 눌렀을 때 전체 선택(0 지우기/커서 이동 없이 바로 입력)
+    shipItems.querySelectorAll('input[type="number"]').forEach(inp => bindAutoSelectInput(inp));
+    collectBoxes.querySelectorAll('input[type="number"]').forEach(inp => bindAutoSelectInput(inp));
+
+    // + / - buttons for ship items
+    shipItems.querySelectorAll('.qty-btn').forEach(btn => {
+      btn.onclick = () => {
+        tap();
+        const idx = btn.dataset.idx;
+        const step = Number(btn.dataset.step);
+        const inp = shipItems.querySelector(`input[data-idx="${idx}"]`);
+        inp.value = num(inp.value) + step;
+        calcShipTotal();
+      };
+    });
+
+    // + / - buttons for collect boxes
+    collectBoxes.querySelectorAll('.qty-btn').forEach(btn => {
+      btn.onclick = () => {
+        tap();
+        const key = btn.dataset.ct;
+        const step = Number(btn.dataset.step);
+        const inp = collectBoxes.querySelector(`input[data-ct="${key}"]`);
+        inp.value = num(inp.value) + step;
+      };
+    });
+
+    document.getElementById('shipClear').onclick = () => {
+      shipItems.querySelectorAll('input[type="number"]').forEach(i => i.value = '0');
+      collectBoxes.querySelectorAll('input[type="number"]').forEach(i => i.value = '0');
+      calcShipTotal();
+    };
+
+    document.getElementById('shipSave').onclick = () => {
+      const wh = selectedWarehouse;
+      const date = document.getElementById('shipDate').value || todayISO();
+
+      const lines = [];
+      shipItems.querySelectorAll('input[type="number"]').forEach(inp => {
+        const idx = Number(inp.dataset.idx);
+        const q = num(inp.value);
+        if (q !== 0) lines.push({ name: items[idx].name, qty: q });
+      });
+
+      const collected = {};
+      collectBoxes.querySelectorAll('input[type="number"]').forEach(inp => {
+        const k = inp.dataset.ct;
+        const q = num(inp.value);
+        if (q !== 0) collected[k] = q;
+      });
+
+      if (lines.length === 0 && Object.keys(collected).length === 0) {
+        alert('출고 수량 또는 수거 수량을 입력해주세요.');
+        return;
+      }
+
+      // ✏ 수정 모드: 기존 전표 롤백
+      if (editingRecord) {
+        editingRecord.editedAt = Date.now();
+        const r = editingRecord;
+        if (r.items && r.items.length) {
+          if (r.warehouse === '명성') {
+            for (const ln of r.items) {
+              if (ln.name === '18.9L') {
+                myStock['18.9L'] = num(myStock['18.9L']) + num(ln.qty);
+              } else {
+                const it = items.find(x => x.name === ln.name) || {};
+                settlement.myeong -= num(ln.qty) * num(it.myeongseong);
+              }
+            }
+          } else {
+            for (const ln of r.items) {
+              const it = items.find(x => x.name === ln.name) || {};
+              settlement.eumbong -= num(ln.qty) * num(it.eumbong);
+            }
+          }
+        }
+        if (r.collected) {
+          for (const k of Object.keys(r.collected)) {
+            containerHeld[r.warehouse][k] = num(containerHeld[r.warehouse][k]) - num(r.collected[k]);
+          }
+        }
+        outgoRecords = outgoRecords.filter(x => x.id !== r.id);
+      
+      }
+
+      // ➕ 신규(또는 수정 후) 반영
+      if (lines.length > 0) {
+        if (wh === '명성') {
+          for (const ln of lines) {
+            if (ln.name === '18.9L') {
+              myStock['18.9L'] = num(myStock['18.9L']) - num(ln.qty);
+            } else {
+              const it = items.find(x => x.name === ln.name) || {};
+              settlement.myeong += num(ln.qty) * num(it.myeongseong);
+            }
+          }
+        } else {
+          for (const ln of lines) {
+            const it = items.find(x => x.name === ln.name) || {};
+            settlement.eumbong += num(ln.qty) * num(it.eumbong);
+          }
+        }
+      }
+
+      if (Object.keys(collected).length > 0) {
+        for (const k of Object.keys(collected)) {
+          containerHeld[wh][k] = num(containerHeld[wh][k]) + num(collected[k]);
+        }
+      }
+
+      const record = { id: uid(), date, warehouse: wh, items: lines, collected, total: calcShipTotal(), ...(editingRecord ? { editedAt: Date.now() } : {}) };
+
+      // ⭐ 방금 출고한 전표 표시용
+      localStorage.setItem('lastShipId', String(record.id));
+      outgoRecords.push(record);
+
+      saveJSON(KEYS.outgo, outgoRecords);
+      saveJSON(KEYS.myStock, myStock);
+      saveJSON(KEYS.containerHeld, containerHeld);
+      saveJSON(KEYS.settlement, settlement);
+
+      editingRecord = null;
+      syncHeader();
+      alert('출고 저장 완료');
+      show(wh === '명성' ? 'hist_m' : 'hist_e');
+    };
+
+    calcShipTotal();
+  }
+
+  /********************
+   * Inbound/Return (입고/반납)
+   ********************/
+  function renderInbound(){
+    const el = document.getElementById('screen');
+    el.innerHTML = `
+      <div class="space-y-4">
+        <!-- 공병/크레이트 반납(창고로) -->
+        <div class="bg-white rounded-2xl shadow p-4 space-y-4">
+          <div class="flex items-center gap-2">
+            <div class="text-xl font-extrabold">📥 입고/반납</div>
+            ${window.editingInboundRecord ? `<span class=\"px-2 py-0.5 rounded-full bg-yellow-200 text-yellow-800 text-xs font-extrabold\">수정 중</span>` : ``}
+          </div>
+          <div class="text-sm text-gray-500">자주 하는 작업: 공병/크레이트 <span class="font-semibold">창고 반납</span> (내 보유 수량에서 차감)</div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label class="text-sm font-semibold">반납 창고</label>
+              <select id="retWarehouse" class="w-full border p-2 rounded-xl bg-gray-50">
+                <option value="명성">명성</option>
+                <option value="음봉">음봉</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-sm font-semibold">날짜</label>
+              <input id="retDate" type="date" class="w-full border p-2 rounded-xl bg-gray-50" />
+            </div>
+            <div>
+              <label class="text-sm font-semibold">한 차 수량</label>
+              <input id="truckSize" type="number" class="w-full border p-2 rounded-xl bg-gray-50" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3" id="retGrid"></div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <button id="retSave" class="rounded-2xl bg-emerald-600 text-white font-extrabold py-4 shadow">반납 저장</button>
+            <button id="retClear" class="rounded-2xl bg-gray-700 text-white font-bold py-4 shadow">입력 초기화</button>
+          </div>
+
+          <button id="goInboundHist" class="w-full mt-3 rounded-2xl bg-slate-800 text-white font-extrabold py-4 shadow">입고 / 반납 조회</button>
+
+          <div class="text-sm text-gray-500">※ 반납은 정산 금액에 영향이 없습니다. (공병/크레이트는 수량 관리용)</div>
+        </div>
+
+        <!-- 개인 재고 18.9L 입고 (하단) -->
+        <div class="bg-white rounded-2xl shadow p-4 space-y-4">
+          <div class="flex items-center justify-between">
+            <div class="text-xl font-extrabold">🏷 개인 재고 18.9L 입고</div>
+            <div class="text-sm text-gray-500">(한 달 1~2회)</div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label class="text-sm font-semibold">날짜</label>
+              <input id="pDate" type="date" class="w-full border p-2 rounded-xl bg-gray-50" />
+            </div>
+            <div>
+              <label class="text-sm font-semibold">정산 단가</label>
+              <input id="pRate" type="number" class="w-full border p-2 rounded-xl bg-gray-50" />
+            </div>
+            <div>
+              <label class="text-sm font-semibold">한 차 수량</label>
+              <input id="pTruck" type="number" class="w-full border p-2 rounded-xl bg-gray-50" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 items-stretch">
+            <button id="pTruckBtn" class="rounded-2xl bg-purple-600 text-white font-extrabold py-4 shadow w-full">한 차 입고 (+수량)</button>
+            <!-- 모바일에서 튀어나오지 않도록 grid로 고정 -->
+            <div class="grid grid-cols-[1fr_auto] gap-2 items-stretch w-full overflow-hidden">
+              <input id="pQty" type="number" class="border p-2 rounded-xl bg-gray-50 w-full" placeholder="직접 수량" />
+              <button id="pQtyBtn" class="rounded-2xl bg-purple-700 text-white font-bold px-4 whitespace-nowrap flex-shrink-0">입고</button>
+            </div>
+          </div>
+          </div>
+          </div>
+
+          <div class="text-sm text-gray-500">※ 개인 재고 <span class="font-semibold">입고 금액(수량×단가)</span>만 음봉 정산에 즉시 누적됩니다. 출고(명성 18.9L)는 정산에 영향을 주지 않습니다.</div>
+        </div>
+      </div>
+    `;
+
+    // defaults
+    document.getElementById('retDate').value = todayISO();
+
+    // ✏ 반납 전표 수정 모드: 날짜/창고 복원
+    if (window.editingInboundRecord && window.editingInboundRecord.type === 'container_return') {
+      const r = window.editingInboundRecord;
+      document.getElementById('retDate').value = r.date;
+      document.getElementById('retWarehouse').value = r.warehouse;
+    }
+    document.getElementById('truckSize').value = truckSize;
+    document.getElementById('pDate').value = todayISO();
+    document.getElementById('pRate').value = personalRate;
+    document.getElementById('pTruck').value = truckSize;
+
+    // build return grid
+    // ✏ 반납 전표 수정 모드: 수량 자동 채움
+    const retGrid = document.getElementById('retGrid');
+    retGrid.innerHTML = CONTAINER_TYPES.map(t => {
+      return `
+        <div class="bg-gray-50 border rounded-2xl p-3 space-y-2">
+          <div class="flex justify-between items-center">
+            <div class="font-bold">${t.label}</div>
+            <div class="text-xs text-gray-500">보유: <span id="held_${t.key}" class="text-2xl font-extrabold">0</span></div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button data-car="${t.key}" class="rounded-xl bg-slate-800 text-white font-bold py-2">한 차 반납 (-)</button>
+            <input data-qty="${t.key}" type="number" class="border p-2 rounded-xl text-right" value="0" />
+          </div>
+        </div>`;
+    }).join('');
+
+    // ✅ 반납 전표 수정 모드: 수량 자동 채움 (DOM 생성 직후, 여기서만 실행)
+    if (window.editingInboundRecord && window.editingInboundRecord.type === 'container_return') {
+      const r = window.editingInboundRecord;
+      retGrid.querySelectorAll('input[data-qty]').forEach(inp => {
+        const k = inp.dataset.qty;
+        if (r.changes && r.changes[k] !== undefined) {
+          inp.value = Math.abs(r.changes[k]);
+        }
+      });
+    }
+
+    // 🔁 한 차 반납 버튼: 현재 한 차 수량으로 자동 채움
+    retGrid.querySelectorAll('button[data-car]').forEach(btn => {
+      btn.onclick = () => {
+        tap();
+        const key = btn.dataset.car;
+        const qty = num(document.getElementById('truckSize').value) || truckSize;
+        const inp = retGrid.querySelector(`input[data-qty="${key}"]`);
+        if (inp) inp.value = qty;
+      };
+    });
+
+
+
+    document.getElementById('retClear').onclick = () => {
+      retGrid.querySelectorAll('input[data-qty]').forEach(i => i.value = '0');
+    };
+
+    document.getElementById('retSave').onclick = () => {
+      const isEdit = window.editingInboundRecord && window.editingInboundRecord.type === 'container_return';
+
+      if (!confirm('반납 처리 할까요?')) return;
+
+      // ✏ 수정 모드: 기존 전표 롤백
+      if (isEdit) {
+        const r = window.editingInboundRecord;
+        for (const k of Object.keys(r.changes || {})) {
+          containerHeld[r.warehouse][k] = num(containerHeld[r.warehouse][k]) - num(r.changes[k]);
+        }
+        inboundRecords = inboundRecords.filter(x => x.id !== r.id);
+        window.editingInboundRecord = null;
+      }
+
+      const wh = document.getElementById('retWarehouse').value;
+      const date = document.getElementById('retDate').value || todayISO();
+      const size = num(document.getElementById('truckSize').value);
+      truckSize = size || truckSize;
+      localStorage.setItem(KEYS.truckSize, String(truckSize));
+
+      const changes = {};
+      retGrid.querySelectorAll('input[data-qty]').forEach(inp => {
+        const key = inp.dataset.qty;
+        const q = num(inp.value);
+        if (q !== 0) {
+          containerHeld[wh][key] = num(containerHeld[wh][key]) - q;
+          changes[key] = -q;
+        }
+      });
+
+      if (Object.keys(changes).length === 0) {
+        alert('저장할 반납 수량을 입력해주세요.');
+        return;
+      }
+
+      const rec = { id: uid(), date, warehouse: wh, type: 'container_return', changes, ...(isEdit ? { editedAt: Date.now() } : {}) };
+      inboundRecords.push(rec);
+
+      saveJSON(KEYS.inbound, inboundRecords);
+      saveJSON(KEYS.containerHeld, containerHeld);
+      syncHeader();
+
+      localStorage.setItem('lastInboundId', String(rec.id));
+      show('inbound_hist');
+    };
+
+    // 👉 입고 / 반납 조회 버튼 연결
+    document.getElementById('goInboundHist').onclick = () => {
+      show('inbound_hist');
+    };
+
+    // ✏ 개인 재고 입고 (수정 모드 지원)
+    if (window.editingInboundRecord && window.editingInboundRecord.type === 'personal_inbound') {
+      const r = window.editingInboundRecord;
+      document.getElementById('pDate').value = r.date;
+      document.getElementById('pRate').value = r.unitPrice;
+      document.getElementById('pTruck').value = r.qty;
+      document.getElementById('pQty').value = r.qty;
+    }
+
+    // personal inbound
+    document.getElementById('pTruckBtn').onclick = () => {
+      const date = document.getElementById('pDate').value || todayISO();
+      personalRate = num(document.getElementById('pRate').value) || personalRate;
+      localStorage.setItem(KEYS.personalRate, String(personalRate));
+      const qty = num(document.getElementById('pTruck').value);
+      if (!qty) return alert('한 차 수량이 0입니다.');
+      if (!confirm(`${qty}개 한 차 입고 처리 할까요?`)) return;
+
+      myStock['18.9L'] = num(myStock['18.9L']) + qty;
+      settlement.eumbong += qty * personalRate;
+
+      // ✏ 수정 모드: 기존 개인 입고 전표 롤백
+      if (window.editingInboundRecord && window.editingInboundRecord.type === 'personal_inbound') {
+        const r = window.editingInboundRecord;
+        myStock['18.9L'] = num(myStock['18.9L']) - num(r.qty);
+        settlement.eumbong -= num(r.amount);
+        inboundRecords = inboundRecords.filter(x => x.id !== r.id);
+      }
+
+      const rec = { id: uid(), date, type: 'personal_inbound', qty, unitPrice: personalRate, amount: qty*personalRate };
+      inboundRecords.push(rec);
+
+      saveJSON(KEYS.myStock, myStock);
+      saveJSON(KEYS.settlement, settlement);
+      saveJSON(KEYS.inbound, inboundRecords);
+
+      // ✅ 수정 상태 종료
+      window.editingInboundRecord = null;
+
+      syncHeader();
+      alert(`개인 재고 입고 완료 (+${qty})
+음봉 정산 +${money(qty*personalRate)}`);
+      show('home');
+    };
+
+    document.getElementById('pQtyBtn').onclick = () => {
+      const date = document.getElementById('pDate').value || todayISO();
+      personalRate = num(document.getElementById('pRate').value) || personalRate;
+      localStorage.setItem(KEYS.personalRate, String(personalRate));
+      const qty = num(document.getElementById('pQty').value);
+      if (!qty) return alert('수량을 입력해주세요.');
+      if (!confirm(`${qty}개 입고 처리 할까요?`)) return;
+
+      myStock['18.9L'] = num(myStock['18.9L']) + qty;
+      settlement.eumbong += qty * personalRate;
+
+      // ✏ 수정 모드: 기존 개인 입고 전표 롤백
+      if (window.editingInboundRecord && window.editingInboundRecord.type === 'personal_inbound') {
+        const r = window.editingInboundRecord;
+        myStock['18.9L'] = num(myStock['18.9L']) - num(r.qty);
+        settlement.eumbong -= num(r.amount);
+        inboundRecords = inboundRecords.filter(x => x.id !== r.id);
+      }
+
+      const rec = { id: uid(), date, type: 'personal_inbound', qty, unitPrice: personalRate, amount: qty*personalRate };
+      inboundRecords.push(rec);
+
+      saveJSON(KEYS.myStock, myStock);
+      saveJSON(KEYS.settlement, settlement);
+      saveJSON(KEYS.inbound, inboundRecords);
+
+      // ✅ 수정 상태 종료
+      window.editingInboundRecord = null;
+
+      syncHeader();
+      alert(`개인 재고 입고 완료 (+${qty})
+음봉 정산 +${money(qty*personalRate)}`);
+      show('home');
+    };
+
+    refreshHeld();
+  }
+
+  /********************
+   * History (조회)
+   ********************/
+  function renderInboundHistory(){
+    const el = document.getElementById('screen');
+    el.innerHTML = `
+      <div class="bg-white rounded-2xl shadow p-4 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="text-xl font-extrabold">📘 입고 / 반납 조회</div>
+          <div class="text-sm text-gray-500">전표별(최신순)</div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label class="text-sm font-semibold">기간 설정</label>
+            <select id="ihQuick" class="w-full border p-2 rounded-xl bg-gray-50">
+              <option value="this">이번 달</option>
+              <option value="last">지난 달</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-sm font-semibold">시작일</label>
+            <input id="ihStart" type="date" class="w-full border p-2 rounded-xl bg-gray-50" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">종료일</label>
+            <input id="ihEnd" type="date" class="w-full border p-2 rounded-xl bg-gray-50" />
+          </div>
+        </div>
+        <button id="ihSearch" class="w-full rounded-2xl bg-blue-600 text-white font-extrabold py-3 shadow">검색</button>
+        <div id="ihResult" class="space-y-3"></div>
+      </div>
+    `;
+
+    const ihStart = document.getElementById('ihStart');
+    const ihEnd = document.getElementById('ihEnd');
+    const ihQuick = document.getElementById('ihQuick');
+
+    const today = new Date();
+    ihStart.value = toLocalISO(new Date(today.getFullYear(), today.getMonth(), 1));
+    ihEnd.value = toLocalISO(today);
+
+    function openSlipActionMenuInbound(record){
+      const overlay = document.createElement('div');
+      overlay.className = 'slip-action-menu';
+      overlay.innerHTML = `
+        <div class="slip-action-box space-y-3">
+          <div class="font-extrabold text-lg">전표 관리</div>
+          <div class="text-sm text-gray-500">입고 / 반납 전표를 관리합니다.</div>
+          <button id="slipEdit" class="w-full rounded-xl bg-blue-600 text-white font-bold py-3">✏ 수정</button>
+          <button id="slipDelete" class="w-full rounded-xl bg-red-600 text-white font-bold py-3">🗑 삭제</button>
+          <button id="slipCancel" class="w-full rounded-xl bg-gray-300 font-bold py-2">취소</button>
+        </div>`;
+
+      function close(){ overlay.remove(); }
+      overlay.addEventListener('click', e=>{ if(e.target===overlay) close(); });
+      overlay.querySelector('#slipCancel').onclick = close;
+
+      overlay.querySelector('#slipEdit').onclick = () => {
+        // 입고/반납 전표 수정 (개인 입고 / 반납 공통)
+        window.editingInboundRecord = record;
+        close();
+        show('inbound');
+      };
+
+      overlay.querySelector('#slipDelete').onclick = () => {
+        if (!confirm('이 전표를 삭제할까요?\n(재고/정산이 함께 되돌려집니다)')) return;
+
+        // rollback
+        if(record.type === 'personal_inbound'){
+          myStock['18.9L'] = num(myStock['18.9L']) - num(record.qty);
+          settlement.eumbong -= num(record.amount);
+        }
+        if(record.type === 'container_return'){
+          for(const k of Object.keys(record.changes||{})){
+            containerHeld[record.warehouse][k] = num(containerHeld[record.warehouse][k]) - num(record.changes[k]);
+          }
+        }
+        inboundRecords = inboundRecords.filter(r=>r.id!==record.id);
+        saveJSON(KEYS.inbound, inboundRecords);
+        saveJSON(KEYS.myStock, myStock);
+        saveJSON(KEYS.settlement, settlement);
+        saveJSON(KEYS.containerHeld, containerHeld);
+        syncHeader();
+        close();
+        run();
+      };
+      document.body.appendChild(overlay);
+    }
+
+    function run(){
+      const res = document.getElementById('ihResult');
+      res.innerHTML = '';
+      const s = ihStart.value, e = ihEnd.value;
+      const list = inboundRecords.filter(r => r.date >= s && r.date <= e)
+        .sort((a,b)=> b.id - a.id);
+      if(!list.length){ res.innerHTML = '<div class="text-center text-gray-500">내역이 없습니다.</div>'; return; }
+      for(const r of list){
+        const isIn = r.type === 'personal_inbound';
+        const card = document.createElement('div');
+        card.className = `no-select border rounded-2xl p-4 ${isIn ? 'bg-purple-50 border-purple-300' : 'bg-slate-50 border-slate-300'}`;
+        const isEdited = !!r.editedAt;
+        card.innerHTML = `
+          <div class="flex justify-between">
+            <div class="font-extrabold">${r.date} ${isEdited ? `<span class=\"ml-2 px-2 py-0.5 rounded-full bg-yellow-200 text-yellow-800 text-xs font-bold\">수정됨</span>` : ''}</div>
+            <div class="text-sm font-bold ${isIn ? 'text-purple-700' : 'text-slate-700'}">${isIn ? '입고' : '반납'}</div>
+          </div>
+          <div class="mt-2">
+            ${isIn
+              ? `수량 +${r.qty} / ${money(r.amount)}`
+              : Object.keys(r.changes || {})
+                  .map(k => {
+                    const label = (CONTAINER_TYPES.find(t => t.key === k) || {}).label || k;
+                    return `<div>${label}: ${r.changes[k]}</div>`;
+                  })
+                  .join('')}
+          </div>`;
+            `;
+            }).join('')}
+          </div>`;
+        let t;
+        card.addEventListener('pointerdown', e=>{
+          e.preventDefault();
+          t=setTimeout(()=>{
+            tap();
+            card.classList.add('long-press-active');
+            openSlipActionMenuInbound(r);
+          },550);
+        });
+        ['pointerup','pointerleave','pointercancel'].forEach(ev=>{
+          card.addEventListener(ev, ()=>{
+            clearTimeout(t);
+            card.classList.remove('long-press-active');
+          });
+        });
+        res.appendChild(card);
+      }
+    }
+    ihQuick.onchange = ()=>{
+      const now=new Date();
+      if(ihQuick.value==='this'){
+        ihStart.value=toLocalISO(new Date(now.getFullYear(),now.getMonth(),1));
+        ihEnd.value=toLocalISO(now);
+      } else {
+        ihStart.value=toLocalISO(new Date(now.getFullYear(),now.getMonth()-1,1));
+        ihEnd.value=toLocalISO(new Date(now.getFullYear(),now.getMonth(),0));
+      }
+    };
+    document.getElementById('ihSearch').onclick = run;
+    setTimeout(run,0);
+  }
+
+  function renderHistory(warehouse){
+    // slip action menu (edit/delete)
+    function openSlipActionMenu(record){
+      const overlay = document.createElement('div');
+      overlay.className = 'slip-action-menu';
+      overlay.innerHTML = `
+        <div class="slip-action-box space-y-3">
+          <div class="font-extrabold text-lg">전표 관리</div>
+          <div class="text-sm text-gray-500">선택한 전표를 수정하거나 삭제할 수 있습니다.</div>
+          <button id="slipEdit" class="w-full rounded-xl bg-blue-600 text-white font-bold py-3">✏ 수정</button>
+          <button id="slipDelete" class="w-full rounded-xl bg-red-600 text-white font-bold py-3">🗑 삭제</button>
+          <button id="slipCancel" class="w-full rounded-xl bg-gray-300 font-bold py-2">취소</button>
+        </div>`;
+
+      function close(){
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }
+
+      overlay.addEventListener('click', (e) => {
+        // 바깥(오버레이)을 누르면 닫기
+        if (e.target === overlay) close();
+      });
+
+      overlay.querySelector('#slipCancel').onclick = () => close();
+
+      overlay.querySelector('#slipDelete').onclick = () => {
+        if(!confirm("이 전표를 삭제할까요?\n(재고 및 정산도 함께 되돌립니다)")) return;
+
+        // 🔁 롤백 처리 (출고 품목)
+        if(record.items && record.items.length){
+          if(record.warehouse === '명성'){
+            for(const ln of record.items){
+              if(ln.name === '18.9L'){
+                myStock['18.9L'] = num(myStock['18.9L']) + num(ln.qty);
+              } else {
+                const it = items.find(x=>x.name===ln.name)||{};
+                settlement.myeong -= num(ln.qty) * num(it.myeongseong);
+              }
+            }
+          } else {
+            for(const ln of record.items){
+              const it = items.find(x=>x.name===ln.name)||{};
+              settlement.eumbong -= num(ln.qty) * num(it.eumbong);
+            }
+          }
+        }
+
+        // 🔁 롤백 처리 (수거 공병/크레이트)
+        if(record.collected){
+          for(const k of Object.keys(record.collected)){
+            containerHeld[record.warehouse][k] = num(containerHeld[record.warehouse][k]) - num(record.collected[k]);
+          }
+        }
+
+        // 전표 삭제
+        outgoRecords = outgoRecords.filter(r=> r.id !== record.id);
+
+        // 저장
+        saveJSON(KEYS.outgo, outgoRecords);
+        saveJSON(KEYS.myStock, myStock);
+        saveJSON(KEYS.containerHeld, containerHeld);
+        saveJSON(KEYS.settlement, settlement);
+
+        syncHeader();
+        close();
+        alert('전표가 삭제되고 재고/정산이 되돌려졌습니다');
+        show(record.warehouse === '명성' ? 'hist_m' : 'hist_e');
+      };
+
+      overlay.querySelector('#slipEdit').onclick = () => {
+        // STEP 3-0: 수정 모드 진입 (전표의 창고 그대로 출고 화면에 반영)
+        editingRecord = record;
+        close();
+        // 👉 전표의 창고를 그대로 선택한 상태로 출고 화면 진입
+        showShippingWith(record.warehouse);
+      };
+
+      document.body.appendChild(overlay);
+    }
+
+    const el = document.getElementById('screen');
+    el.innerHTML = `
+      <div class="bg-white rounded-2xl shadow p-4 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="text-xl font-extrabold">📦 ${warehouse} 출고 조회</div>
+          <div class="text-sm text-gray-500">전표별(최신순) / 품목별 합계</div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label class="text-sm font-semibold">기간 설정</label>
+            <select id="hQuick" class="w-full border p-2 rounded-xl bg-gray-50">
+              <option value="">선택 안함</option>
+              <option value="this">이번 달</option>
+              <option value="last">지난 달</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-sm font-semibold">시작일</label>
+            <input id="hStart" type="date" class="w-full border p-2 rounded-xl bg-gray-50" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">종료일</label>
+            <input id="hEnd" type="date" class="w-full border p-2 rounded-xl bg-gray-50" />
+          </div>
+          <div>
+            <label class="text-sm font-semibold">보기</label>
+            <select id="hMode" class="w-full border p-2 rounded-xl bg-gray-50">
+              <option value="slip">전표별 보기 (최신순)</option>
+              <option value="item">품목별 합계 보기</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <button id="hSearch" class="rounded-2xl bg-blue-600 text-white font-extrabold py-3 shadow">검색</button>
+          <button id="hCSV" class="rounded-2xl bg-emerald-700 text-white font-bold py-3 shadow">CSV 다운로드</button>
+        </div>
+
+        <div id="hResult" class="space-y-3"></div>
+      </div>
+    `;
+
+    const hStart = document.getElementById('hStart');
+    const hEnd = document.getElementById('hEnd');
+    const hQuick = document.getElementById('hQuick');
+
+    const today = new Date();
+    // 🔹 기본값: 이번 달
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    hQuick.value = 'this';
+    hStart.value = toLocalISO(monthStart);
+    hEnd.value = toLocalISO(today);
+
+    function setQuickRange(type){
+      const now = new Date();
+      if(type === 'this'){
+        const s = new Date(now.getFullYear(), now.getMonth(), 1);
+        hStart.value = toLocalISO(s);
+        hEnd.value = toLocalISO(now);
+      }
+      if(type === 'last'){
+        const s = new Date(now.getFullYear(), now.getMonth()-1, 1);
+        const e = new Date(now.getFullYear(), now.getMonth(), 0);
+        hStart.value = toLocalISO(s);
+        hEnd.value = toLocalISO(e);
+      }
+    }
+
+    hQuick.onchange = () => {
+      if(hQuick.value) setQuickRange(hQuick.value);
+    };
+
+    function getFiltered(){
+      const s = hStart.value, e = hEnd.value;
+      return outgoRecords.filter(r => r.warehouse === warehouse && r.date >= s && r.date <= e);
+    }
+
+    const runSearch = () => {
+      const mode = document.getElementById('hMode').value;
+      const res = document.getElementById('hResult');
+      const filtered = getFiltered();
+      res.innerHTML = '';
+
+      if (filtered.length === 0) {
+        res.innerHTML = `<div class="text-center text-gray-500">출고 내역이 없습니다.</div>`;
+        return;
+      }
+
+      if (mode === 'slip') {
+        const sorted = [...filtered].sort((a,b) => {
+          if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+          return b.id - a.id;
+        });
+        for (const r of sorted) {
+          const itemsHtml = (r.items || []).map(i => `<div class='text-sm'>- ${i.name}: ${i.qty}개</div>`).join('') || `<div class='text-sm text-gray-400'>(출고 품목 없음)</div>`;
+          const collectHtml = r.collected && Object.keys(r.collected).length ? `
+            <div class='mt-2 text-sm text-gray-700'>
+              <div class='font-semibold'>수거</div>
+              ${Object.keys(r.collected).map(k => {
+                const label = (CONTAINER_TYPES.find(t=>t.key===k)||{}).label || k;
+                return `<div>- ${label}: ${r.collected[k]}</div>`;
+              }).join('')}
+            </div>` : '';
+
+          const card = document.createElement('div');
+          const isEdited = !!r.editedAt;
+          const isRecent = r.id === loadJSON('lastShipId', null);
+          card.classList.add('no-select');
+          card.className = 'bg-gray-50 border rounded-2xl p-4';
+          card.innerHTML = `
+            <div class='flex justify-between items-start'>
+              <div>
+                <div class='font-extrabold'>${r.date} ${isEdited ? `<span class="ml-2 px-2 py-0.5 rounded-full bg-yellow-200 text-yellow-800 text-xs font-bold">수정됨</span>` : ''}</div>
+                <div class='text-sm text-gray-500'>${r.warehouse}</div>
+              </div>
+              <div class='text-right'>
+                <div class='text-lg font-extrabold ${isRecent ? 'text-emerald-600' : 'text-blue-700'}'>${money(r.total || 0)}</div>
+              </div>
+            </div>
+            <div class='mt-2 ${isRecent ? 'ring-2 ring-emerald-400 rounded-xl p-2' : ''}'>${itemsHtml}</div>
+            ${collectHtml}
+          `;
+          let pressTimer;
+          card.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            pressTimer = setTimeout(() => {
+              tap();
+              card.classList.add('long-press-active');
+              openSlipActionMenu(r);
+            }, 550);
+          });
+          card.addEventListener('pointerup', () => {
+            clearTimeout(pressTimer);
+            card.classList.remove('long-press-active');
+          });
+          card.addEventListener('pointerleave', () => clearTimeout(pressTimer));
+          card.addEventListener('pointercancel', () => clearTimeout(pressTimer));
+
+          res.appendChild(card);
+        }
+      } else {
+        const summary = {};
+        for (const r of filtered) {
+          for (const it of (r.items || [])) {
+            summary[it.name] = (summary[it.name] || 0) + num(it.qty);
+          }
+        }
+
+        const box = document.createElement('div');
+        box.className = 'bg-gray-50 border rounded-2xl p-4';
+        let total = 0;
+        let rows = '';
+        for (const name of Object.keys(summary)) {
+          const qty = summary[name];
+          const info = items.find(x => x.name === name) || {};
+          const price = warehouse === '명성' ? num(info.myeongseong) : num(info.eumbong);
+          const sum = qty * price;
+          total += sum;
+          rows += `<div class='flex justify-between py-1 border-b'><div>${name} <span class='text-gray-500 text-sm'>(${qty}개)</span></div><div class='font-semibold'>${money(sum)}</div></div>`;
+        }
+        box.innerHTML = `
+          <div class='font-extrabold mb-2'>품목별 합계</div>
+          <div>${rows}</div>
+          <div class='mt-3 flex justify-between text-lg font-extrabold'><span>총 합계</span><span class='text-blue-700'>${money(total)}</span></div>
+          <div class='text-sm text-gray-500 mt-2'>※ 명성의 18.9L 단가는 0원으로 계산됩니다.</div>
+        `;
+        res.appendChild(box);
+      }
+    };
+
+    document.getElementById('hSearch').onclick = runSearch;
+
+    // 🔹 기본 동작: 화면 열리자마자 검색 실행
+    document.getElementById('hMode').value = 'slip';
+    setTimeout(runSearch, 0);
+
+    // CSV 다운로드
+
+
+    document.getElementById('hCSV').onclick = () => {
+      const filtered = getFiltered();
+      if (filtered.length === 0) return alert('내보낼 데이터가 없습니다.');
+      let csv = 'date,warehouse,item,qty,total\n';
+      for (const r of filtered) {
+        if (r.items && r.items.length) {
+          for (const it of r.items) {
+            csv += `${r.date},${r.warehouse},${it.name},${it.qty},${r.total || 0}\n`;
+          }
+        } else {
+          csv += `${r.date},${r.warehouse},(none),0,${r.total || 0}\n`;
+        }
+      }
+      const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${warehouse}_출고_${hStart.value}_${hEnd.value}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+  }
+
+  /********************
+   * Settings
+   ********************/
+  function renderSettings(){
+    const el = document.getElementById('screen');
+    el.innerHTML = `
+      <div class="space-y-4">
+        <div class="bg-white rounded-2xl shadow p-4 space-y-3">
+          <div class="text-xl font-extrabold">⚙ 설정 (품목/단가)</div>
+          <div class="text-sm text-gray-500">단가/품목은 수년에 한 번 바뀔 수 있으니 수정 가능하도록 합니다.</div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div class="bg-gray-50 border rounded-2xl p-3">
+              <div class="text-sm text-gray-500">개인재고 18.9L 정산 단가</div>
+              <input id="setRate" type="number" class="w-full border p-2 rounded-xl mt-2" />
+            </div>
+            <div class="bg-gray-50 border rounded-2xl p-3">
+              <div class="text-sm text-gray-500">한 차 수량(기본)</div>
+              <input id="setTruck" type="number" class="w-full border p-2 rounded-xl mt-2" />
+            </div>
+            <div class="bg-gray-50 border rounded-2xl p-3">
+              <div class="text-sm text-gray-500">월초 초기화</div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
+  <button class="rounded-2xl bg-rose-600 text-white font-extrabold py-3 shadow" onclick="resetSettlementM()">명성 입금 완료 (정산 0으로)</button>
+  <button class="rounded-2xl bg-sky-600 text-white font-extrabold py-3 shadow" onclick="resetSettlementE()">음봉 입금 완료 (정산 0으로)</button>
+</div>
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <button id="saveBasics" class="rounded-2xl bg-blue-600 text-white font-extrabold py-3 px-5 shadow">기본값 저장</button>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-4 space-y-3">
+          <div class="font-extrabold">품목 목록</div>
+          <div class="text-sm text-gray-500">명성/음봉 단가를 각각 편집할 수 있습니다.</div>
+          <div id="itemsTable" class="space-y-2"></div>
+          <div class="flex gap-2">
+            <button id="addItem" class="rounded-xl bg-emerald-600 text-white font-bold py-2 px-4">+ 품목 추가</button>
+            <button id="saveItems" class="rounded-xl bg-blue-600 text-white font-bold py-2 px-4">저장</button>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-4 space-y-3">
+          <div class="font-extrabold">💾 데이터 백업 / 복원</div>
+          <div class="text-sm text-gray-500">PC에서 입력한 데이터를 파일로 저장하고, 다른 기기(안드로이드)에서 그대로 복원할 수 있습니다.</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <button id="backupBtn" class="rounded-2xl bg-indigo-600 text-white font-extrabold py-3 shadow">📥 데이터 백업</button>
+            <label class="rounded-2xl bg-indigo-100 text-indigo-800 font-bold py-3 shadow flex items-center justify-center cursor-pointer">
+              📤 데이터 복원
+              <input id="restoreInput" type="file" accept="application/json" class="hidden" />
+            </label>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow p-4 space-y-3">
+          <div class="font-extrabold text-red-700">⚠ 데이터 초기화</div>
+          <div class="text-sm text-gray-500">운영 시작 전/테스트 후 전체 데이터를 0으로 돌립니다. 실수 방지를 위해 확인창이 뜹니다.</div>
+          <button id="resetAll" class="w-full rounded-2xl bg-red-700 text-white font-extrabold py-4 shadow">전체 데이터 초기화</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('setRate').value = personalRate;
+    document.getElementById('setTruck').value = truckSize;
+
+    document.getElementById('saveBasics').onclick = () => {
+      personalRate = num(document.getElementById('setRate').value) || personalRate;
+      truckSize = num(document.getElementById('setTruck').value) || truckSize;
+      localStorage.setItem(KEYS.personalRate, String(personalRate));
+      localStorage.setItem(KEYS.truckSize, String(truckSize));
+      alert('저장되었습니다.');
+    };
+
+    document.getElementById('resetMonth').onclick = () => {
+      if (!confirm('정산(명성/음봉)만 0으로 초기화할까요?\n(출고/입고 기록은 유지됩니다)')) return;
+      settlement = { myeong:0, eumbong:0 };
+      saveJSON(KEYS.settlement, settlement);
+      syncHeader();
+      alert('월초 초기화 완료');
+    };
+
+    const table = document.getElementById('itemsTable');
+    function drawItems(){
+      table.innerHTML = '';
+      items.forEach((it, idx) => {
+        const row = document.createElement('div');
+        row.className = 'grid grid-cols-1 md:grid-cols-5 gap-2 bg-gray-50 border rounded-2xl p-3';
+        row.innerHTML = `
+          <input data-i="${idx}" data-f="name" class="border p-2 rounded-xl" value="${it.name}" ${it.lock ? 'disabled' : ''} />
+          <input data-i="${idx}" data-f="m" type="number" class="border p-2 rounded-xl" value="${num(it.myeongseong)}" />
+          <input data-i="${idx}" data-f="e" type="number" class="border p-2 rounded-xl" value="${num(it.eumbong)}" />
+          <div class="text-sm text-gray-500 flex items-center">명성/음봉 단가</div>
+          <button class="rounded-xl bg-slate-800 text-white font-bold py-2" ${it.lock ? 'disabled' : ''} data-del="${idx}">삭제</button>
+        `;
+        table.appendChild(row);
+      });
+
+      table.querySelectorAll('button[data-del]').forEach(btn => {
+        btn.onclick = () => {
+          const idx = Number(btn.dataset.del);
+          if (!items[idx] || items[idx].lock) return;
+          if (!confirm('이 품목을 삭제할까요?')) return;
+          items.splice(idx, 1);
+          drawItems();
+        };
+      });
+
+      table.querySelectorAll('input[data-f]').forEach(inp => {
+        inp.oninput = () => {
+          const i = Number(inp.dataset.i);
+          const f = inp.dataset.f;
+          if (f === 'name') items[i].name = inp.value;
+          if (f === 'm') items[i].myeongseong = num(inp.value);
+          if (f === 'e') items[i].eumbong = num(inp.value);
+        };
+      });
+    }
+
+    drawItems();
+
+    document.getElementById('addItem').onclick = () => {
+      items.push({ name:'새 품목', myeongseong:0, eumbong:0 });
+      drawItems();
+    };
+
+    document.getElementById('saveItems').onclick = () => {
+      saveJSON(KEYS.items, items);
+      alert('품목/단가 저장 완료');
+    };
+
+    // 백업
+    document.getElementById('backupBtn').onclick = () => {
+      const data = {
+        items,
+        outgoRecords,
+        inboundRecords,
+        myStock,
+        containerHeld,
+        settlement,
+        personalRate,
+        truckSize
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `water_io_backup_${todayISO()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    // 복원
+    document.getElementById('restoreInput').onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (!confirm('이 파일로 데이터를 복원할까요?\n현재 데이터는 덮어씌워집니다.')) return;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          items = data.items || items;
+          outgoRecords = data.outgoRecords || [];
+          inboundRecords = data.inboundRecords || [];
+          myStock = data.myStock || myStock;
+          containerHeld = data.containerHeld || containerHeld;
+          settlement = data.settlement || settlement;
+          personalRate = num(data.personalRate || personalRate);
+          truckSize = num(data.truckSize || truckSize);
+
+          saveJSON(KEYS.items, items);
+          saveJSON(KEYS.outgo, outgoRecords);
+          saveJSON(KEYS.inbound, inboundRecords);
+          saveJSON(KEYS.myStock, myStock);
+          saveJSON(KEYS.containerHeld, containerHeld);
+          saveJSON(KEYS.settlement, settlement);
+          localStorage.setItem(KEYS.personalRate, String(personalRate));
+          localStorage.setItem(KEYS.truckSize, String(truckSize));
+
+          syncHeader();
+          alert('데이터 복원이 완료되었습니다.');
+          show('home');
+        } catch(err) {
+          alert('복원 실패: 올바른 백업 파일이 아닙니다.');
+        }
+      };
+      reader.readAsText(file);
+    };
+
+    document.getElementById('resetAll').onclick = () => {
+      if (!confirm('⚠ 모든 데이터(출고/입고/정산/재고/설정)를 삭제합니다.\n\n정말 초기화할까요?')) return;
+      const keysToRemove = [KEYS.items, KEYS.outgo, KEYS.inbound, KEYS.myStock, KEYS.containerHeld, KEYS.settlement, KEYS.personalRate, KEYS.truckSize];
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+      // reset runtime state
+      items = DEFAULT_ITEMS;
+      outgoRecords = [];
+      inboundRecords = [];
+      myStock = { '18.9L': 0 };
+      containerHeld = { 명성:{}, 음봉:{} };
+      for (const wh of ['명성','음봉']) {
+        containerHeld[wh] = {};
+        for (const t of CONTAINER_TYPES) containerHeld[wh][t.key] = 0;
+      }
+      settlement = { myeong:0, eumbong:0 };
+      personalRate = 1800;
+      truckSize = 864;
+      syncHeader();
+      alert('초기화 완료');
+      show('home');
+    };
+  }
+
+  // ===== 뒤로가기(B안) 처리 =====
+  window.onpopstate = function(e){
+    // ✏ 출고/입고 수정 중(back) 처리: 저장 없이 나가면 수정 취소
+    if (editingRecord) {
+      if (confirm('수정을 취소하고 메인 화면으로 돌아갈까요?')) {
+        editingRecord = null;
+        show('home');
+      } else {
+        history.pushState({ screen: 'shipping' }, '', '#shipping');
+      }
+      return;
+    }
+    if (window.editingInboundRecord) {
+      if (confirm('수정을 취소하고 메인 화면으로 돌아갈까요?')) {
+        window.editingInboundRecord = null;
+        show('home');
+      } else {
+        history.pushState({ screen: 'inbound' }, '', '#inbound');
+      }
+      return;
+    }
+
+    const header = document.getElementById('appHeader');
+    if (header && header.style.display === 'none') {
+      show('home');
+      return;
+    }
+    if (confirm('앱을 종료할까요?')) {
+      history.go(-1);
+    } else {
+      history.pushState({ screen: 'home' }, '', '#home');
+    }
+  };
+
+  // initial render
+  syncHeader();
+  history.replaceState({ screen: 'home' }, '', '#home');
+
+// intro title fade-out
+setTimeout(()=>{
+  const intro = document.getElementById('introTitle');
+  if(intro){
+    intro.firstElementChild.classList.add('opacity-0');
+    setTimeout(()=>{
+      intro.remove();
+      const header = document.getElementById('appHeader');
+      if(header) header.style.display = 'block';
+    }, 500);
+  }
+}, 1000);
+
+show('home');
+
+</script>
+</body>
+</html>
