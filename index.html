@@ -1514,14 +1514,14 @@ function show(name){
         </div>
 
         <div class="bg-white rounded-2xl shadow p-4 space-y-3">
-          <div class="flex items-center justify-between">
-            <div class="font-extrabold text-lg">📦 품목 목록 및 출고 순서</div>
-            <span class="text-xs px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 font-bold">⭐ 기본표시 = 출고 첫 화면 노출</span>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="font-extrabold text-lg whitespace-nowrap">📦 품목 목록 및 출고 순서</div>
+            <span class="text-xs px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 font-bold whitespace-nowrap">⭐ 기본표시 = 출고 첫 화면 노출</span>
           </div>
-          <div class="text-sm text-gray-500">
-            <span class="font-semibold text-gray-700">▲/▼ 버튼</span>으로 표시 순서를 바꾸고, 자주 출고하는 품목(예: 18.9L, 500ml)은 <span class="font-semibold text-amber-700">⭐ 기본표시</span>로 켜두세요. 나머지 품목은 출고 화면에서 '기타 품목 펼치기' 안에 깔끔하게 접혀 있습니다.
+          <div class="text-sm text-gray-500 leading-relaxed">
+            <span class="font-semibold text-gray-700">▲/▼ 버튼</span>으로 순서를 바꾸고, 자주 쓰는 품목은 <span class="font-semibold text-amber-700">⭐ 기본표시</span>로 켜두세요.
           </div>
-          <div id="itemsTable" class="space-y-2.5"></div>
+          <div id="itemsTable" class="space-y-3"></div>
           <div class="flex gap-2 pt-1">
             <button id="addItem" class="flex-1 rounded-xl bg-emerald-600 text-white font-bold py-3 px-4 shadow">+ 새 품목 추가</button>
             <button id="saveItems" class="flex-1 rounded-xl bg-blue-600 text-white font-extrabold py-3 px-4 shadow">품목/단가 저장</button>
@@ -1594,28 +1594,37 @@ function show(name){
         const row = document.createElement('div');
         row.className = `border rounded-2xl p-3 space-y-2.5 transition ${isPinned ? 'bg-amber-50/60 border-amber-300' : 'bg-gray-50 border-gray-200'}`;
         row.innerHTML = `
+          <!-- 1줄: 번호 + 품목명 입력칸 (세로 화면에서도 품목명이 넓고 선명하게 보이도록 전체 폭 할당) -->
           <div class="flex items-center gap-2">
             <span class="w-7 h-7 rounded-full bg-slate-700 text-white text-xs font-extrabold flex items-center justify-center flex-shrink-0">${idx + 1}</span>
-            <input data-i="${idx}" data-f="name" class="flex-1 min-w-0 border p-2 rounded-xl font-bold bg-white ${it.lock ? 'text-gray-500 bg-gray-100' : ''}" value="${it.name}" ${it.lock ? 'disabled' : ''} placeholder="품목명" />
-            <button type="button" data-pin="${idx}" class="px-2.5 py-2 rounded-xl text-xs font-extrabold border whitespace-nowrap flex-shrink-0 ${isPinned ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-sm' : 'bg-white text-gray-500 border-gray-300'}">
+            <input data-i="${idx}" data-f="name" class="flex-1 min-w-0 border border-gray-300 px-3 py-2 rounded-xl text-base font-extrabold bg-white ${it.lock ? 'text-gray-600 bg-gray-100' : 'text-gray-900'}" value="${it.name}" ${it.lock ? 'disabled' : ''} placeholder="품목명 입력" />
+          </div>
+          <!-- 2줄: 출고 기본표시 스위치 + 위/아래 순서 이동 + 삭제 단추 -->
+          <div class="flex items-center justify-between gap-2">
+            <button type="button" data-pin="${idx}" class="px-3 py-1.5 rounded-xl text-xs font-extrabold border whitespace-nowrap ${isPinned ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-sm' : 'bg-white text-gray-600 border-gray-300'}">
               ${isPinned ? '⭐ 기본표시' : '☆ 기타접기'}
             </button>
-            <div class="flex items-center gap-1 flex-shrink-0">
-              <button type="button" data-move="up" data-idx="${idx}" class="w-8 h-9 rounded-lg border bg-white font-extrabold text-sm ${idx === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-100'}" ${idx === 0 ? 'disabled' : ''}>▲</button>
-              <button type="button" data-move="down" data-idx="${idx}" class="w-8 h-9 rounded-lg border bg-white font-extrabold text-sm ${idx === items.length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-100'}" ${idx === items.length - 1 ? 'disabled' : ''}>▼</button>
+            <div class="flex items-center gap-1.5">
+              <button type="button" data-move="up" data-idx="${idx}" class="w-9 h-8 rounded-lg border border-gray-300 bg-white font-extrabold text-xs flex items-center justify-center ${idx === 0 ? 'opacity-30 cursor-not-allowed' : 'active:bg-gray-100'}" ${idx === 0 ? 'disabled' : ''}>▲</button>
+              <button type="button" data-move="down" data-idx="${idx}" class="w-9 h-8 rounded-lg border border-gray-300 bg-white font-extrabold text-xs flex items-center justify-center ${idx === items.length - 1 ? 'opacity-30 cursor-not-allowed' : 'active:bg-gray-100'}" ${idx === items.length - 1 ? 'disabled' : ''}>▼</button>
+              <button type="button" class="px-3 h-8 rounded-lg bg-slate-800 text-white text-xs font-bold whitespace-nowrap ${it.lock ? 'opacity-30 cursor-not-allowed' : ''}" ${it.lock ? 'disabled' : ''} data-del="${idx}">삭제</button>
             </div>
-            <button type="button" class="px-2.5 py-2 rounded-xl bg-slate-800 text-white text-xs font-bold flex-shrink-0 ${it.lock ? 'opacity-30 cursor-not-allowed' : ''}" ${it.lock ? 'disabled' : ''} data-del="${idx}">삭제</button>
           </div>
+          <!-- 3줄: 명성 단가 / 음봉 단가 (5자리 이상 금액도 잘리지 않도록 상하 라벨 배치) -->
           <div class="grid grid-cols-2 gap-2">
-            <div class="flex items-center bg-white border border-rose-200 rounded-xl px-3 py-1.5">
-              <span class="text-xs font-extrabold text-rose-700 whitespace-nowrap mr-2">명성 단가</span>
-              <input data-i="${idx}" data-f="m" type="number" class="w-full text-right font-bold outline-none bg-transparent" value="${num(it.myeongseong)}" ${it.lock ? 'disabled' : ''} />
-              <span class="text-xs text-gray-400 ml-1">원</span>
+            <div class="bg-white border border-rose-200 rounded-xl px-3 py-1.5">
+              <div class="text-[11px] font-extrabold text-rose-700">명성 단가</div>
+              <div class="flex items-center mt-0.5">
+                <input data-i="${idx}" data-f="m" type="number" class="w-full min-w-0 text-right text-base font-extrabold outline-none bg-transparent ${it.lock ? 'text-gray-400' : 'text-gray-900'}" value="${num(it.myeongseong)}" ${it.lock ? 'disabled' : ''} />
+                <span class="text-xs text-gray-500 ml-1 flex-shrink-0">원</span>
+              </div>
             </div>
-            <div class="flex items-center bg-white border border-sky-200 rounded-xl px-3 py-1.5">
-              <span class="text-xs font-extrabold text-sky-700 whitespace-nowrap mr-2">음봉 단가</span>
-              <input data-i="${idx}" data-f="e" type="number" class="w-full text-right font-bold outline-none bg-transparent" value="${num(it.eumbong)}" />
-              <span class="text-xs text-gray-400 ml-1">원</span>
+            <div class="bg-white border border-sky-200 rounded-xl px-3 py-1.5">
+              <div class="text-[11px] font-extrabold text-sky-700">음봉 단가</div>
+              <div class="flex items-center mt-0.5">
+                <input data-i="${idx}" data-f="e" type="number" class="w-full min-w-0 text-right text-base font-extrabold outline-none bg-transparent text-gray-900" value="${num(it.eumbong)}" />
+                <span class="text-xs text-gray-500 ml-1 flex-shrink-0">원</span>
+              </div>
             </div>
           </div>
         `;
