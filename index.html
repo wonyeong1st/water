@@ -7,10 +7,10 @@
   <link rel="manifest" href="manifest.json">
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 min-h-screen p-4">
+<body class="bg-gray-200 min-h-screen p-4">
 
 <!-- Intro Title Overlay -->
-<div id="introTitle" class="fixed inset-0 flex items-center justify-center bg-gray-100 z-50">
+<div id="introTitle" class="fixed inset-0 flex items-center justify-center bg-gray-200 z-50">
   <div class="text-center transition-opacity duration-500 opacity-100">
     <div class="text-lg text-gray-600">생수 입출고 관리</div>
     <div class="text-2xl font-extrabold mt-1">(주) 신성에프앤디</div>
@@ -100,8 +100,8 @@
 
   <!-- Main nav -->
   <div class="max-w-3xl mx-auto mb-4 grid grid-cols-2 gap-3">
-    <button class="tap-btn rounded-xl bg-red-600 text-white font-bold py-3" onclick="tap(); showShippingWith('명성')">🚚 명성 출고</button>
-    <button class="tap-btn rounded-xl bg-blue-600 text-white font-bold py-3" onclick="tap(); showShippingWith('음봉')">🚚 음봉 출고</button>
+    <button class="tap-btn rounded-2xl bg-red-600 text-white font-extrabold py-5 text-lg shadow" onclick="tap(); showShippingWith('명성')">🚚 명성 출고</button>
+    <button class="tap-btn rounded-2xl bg-blue-600 text-white font-extrabold py-5 text-lg shadow" onclick="tap(); showShippingWith('음봉')">🚚 음봉 출고</button>
     <button class="tap-btn rounded-xl bg-slate-700 text-white font-bold py-3" onclick="tap(); show('hist_m')">📦 명성 조회</button>
     <button class="tap-btn rounded-xl bg-slate-800 text-white font-bold py-3" onclick="tap(); show('hist_e')">📦 음봉 조회</button>
     <button class="tap-btn rounded-xl bg-emerald-600 text-white font-bold py-3" onclick="tap(); show('inbound')">📥 입고/반납</button>
@@ -226,14 +226,14 @@ function bindLongPress(el, onLong){
   };
 
   const DEFAULT_ITEMS = [
-    { name:'18.9L', myeongseong:0, eumbong:1800, lock:true },
-    { name:'2.0L', myeongseong:2000, eumbong:1850 },
-    { name:'500ml', myeongseong:2150, eumbong:2600 },
-    { name:'330ml', myeongseong:2600, eumbong:2508 },
-    { name:'1.0L (12개)', myeongseong:2530, eumbong:2530 },
-    { name:'종이컵(6.5oz)', myeongseong:8100, eumbong:8800 },
-    { name:'봉투컵', myeongseong:13000, eumbong:0 },
-    { name:'(동원)13L', myeongseong:2200, eumbong:0 }
+    { name:'18.9L', myeongseong:0, eumbong:1800, lock:true, pinned:true },
+    { name:'500ml', myeongseong:2150, eumbong:2600, pinned:true },
+    { name:'2.0L', myeongseong:2000, eumbong:1850, pinned:false },
+    { name:'330ml', myeongseong:2600, eumbong:2508, pinned:false },
+    { name:'1.0L (12개)', myeongseong:2530, eumbong:2530, pinned:false },
+    { name:'종이컵(6.5oz)', myeongseong:8100, eumbong:8800, pinned:false },
+    { name:'봉투컵', myeongseong:13000, eumbong:0, pinned:false },
+    { name:'(동원)13L', myeongseong:2200, eumbong:0, pinned:false }
   ];
 
   const CONTAINER_TYPES = [
@@ -283,11 +283,20 @@ function bindLongPress(el, onLong){
     for (const t of CONTAINER_TYPES) if (containerHeld[wh][t.key] === undefined) containerHeld[wh][t.key] = 0;
   }
 
-  // ensure 18.9L exists
-  if (!items.find(x => x.name === '18.9L')) {
-    items.unshift(DEFAULT_ITEMS[0]);
+  function normalizeItemsData(){
+    if (!items.find(x => x.name === '18.9L')) {
+      items.unshift({ ...DEFAULT_ITEMS[0] });
+    }
+    // 기존 저장 데이터에 pinned 속성이 아직 없는 경우: 18.9L와 500ml를 기본 표시(주요 품목)로 지정하고 상단 배치
+    if (items.length > 0 && items.every(x => x.pinned === undefined)) {
+      items.forEach(x => {
+        x.pinned = (x.name === '18.9L' || x.name === '500ml');
+      });
+      items.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+    }
     saveJSON(KEYS.items, items);
   }
+  normalizeItemsData();
 
   function syncHeader(){
     document.getElementById('sumM').innerText = money(settlement.myeong);
@@ -362,13 +371,6 @@ function show(name){
         </div>
       </div>
 
-      <div class="mt-4 bg-white rounded-2xl shadow p-4">
-        <div class="font-bold mb-3">빠른 실행</div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <button class="tap-btn rounded-2xl bg-red-600 text-white font-extrabold py-6 text-xl shadow hover:scale-[1.02] transition" onclick="tap(); showShippingWith('명성')">🚚 명성 출고</button>
-          <button class="tap-btn rounded-2xl bg-blue-600 text-white font-extrabold py-6 text-xl shadow hover:scale-[1.02] transition" onclick="tap(); showShippingWith('음봉')">🚚 음봉 출고</button>
-        </div>
-      </div>
     `;
   }
 
@@ -387,7 +389,7 @@ function show(name){
           <div class="text-sm text-gray-500">날짜는 기본 오늘, 필요 시 과거로 변경</div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <label class="text-sm font-semibold">창고</label>
             <div class="flex gap-2" id="shipWarehouseWrap">
@@ -399,22 +401,29 @@ function show(name){
             <label class="text-sm font-semibold">날짜</label>
             <input id="shipDate" type="date" class="w-full border p-2 rounded-xl bg-gray-50" />
           </div>
-          <div>
-            <label class="text-sm font-semibold">정렬/계산</label>
-            <div class="text-sm text-gray-600 bg-gray-50 border rounded-xl p-2">
-              명성 18.9L 단가는 0원 (개인재고 차감)
+        </div>
+
+        <div class="border rounded-2xl p-3 bg-gray-50">
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-bold">출고 수량 입력</div>
+            <div class="text-xs text-gray-500">※ 명성 18.9L 단가 0원(개인재고 차감)</div>
+          </div>
+          <div id="shipItems" class="space-y-3">
+            <div id="shipMainItems" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+            <div id="shipOtherSection" class="hidden space-y-2">
+              <button type="button" id="toggleOtherItemsBtn" class="w-full py-2.5 px-3 rounded-xl bg-white border border-gray-300 text-sm font-bold text-gray-700 flex items-center justify-center gap-2 shadow-sm">
+                <span id="toggleOtherItemsText">▼ 기타 품목 펼치기</span>
+                <span id="otherItemsBadge" class="hidden px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-extrabold"></span>
+              </button>
+              <div id="shipOtherItems" class="hidden grid grid-cols-1 md:grid-cols-2 gap-3 pt-1"></div>
             </div>
           </div>
         </div>
 
         <div class="border rounded-2xl p-3 bg-gray-50">
-          <div class="font-bold mb-2">출고 수량 입력</div>
-          <div id="shipItems" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
-        </div>
-
-        <div class="border rounded-2xl p-3 bg-gray-50">
-          <div class="font-bold mb-2">공병/크레이트 수거 (선택)
-            <span class="text-sm text-gray-500 font-normal">배송하면서 고객에게서 받은 빈통/크레이트를 기록 (불균형 가능)</span>
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-bold">공병/크레이트 수거</div>
+            <span class="text-xs text-gray-500">고객에게서 수거한 빈통/크레이트</span>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3" id="collectBoxes"></div>
         </div>
@@ -510,18 +519,71 @@ function show(name){
     }
 
     const shipItems = document.getElementById('shipItems');
-    shipItems.innerHTML = items.map((it, idx) => `
+    const shipMainItems = document.getElementById('shipMainItems');
+    const shipOtherSection = document.getElementById('shipOtherSection');
+    const shipOtherItems = document.getElementById('shipOtherItems');
+    const toggleOtherItemsBtn = document.getElementById('toggleOtherItemsBtn');
+    const toggleOtherItemsText = document.getElementById('toggleOtherItemsText');
+    const otherItemsBadge = document.getElementById('otherItemsBadge');
+
+    const renderShipItemCard = (it, idx) => `
         <div class="bg-white border rounded-2xl p-3 flex items-center justify-between gap-2">
           <div>
             <div class="font-bold">${it.name}</div>
-            <div class="text-xs text-gray-500">명성: ${num(it.myeongseong)} / 음봉: ${num(it.eumbong)}</div>
+            <div class="text-xs text-gray-500">명성: ${num(it.myeongseong).toLocaleString()} / 음봉: ${num(it.eumbong).toLocaleString()}</div>
           </div>
           <div class="flex items-center gap-1">
             <button class="qty-btn px-3 py-2 rounded-lg bg-gray-200 font-bold" data-step="-1" data-idx="${idx}">−</button>
-            <input data-idx="${idx}" type="number" class="w-20 border p-2 rounded-xl text-right" value="0" />
+            <input data-idx="${idx}" type="number" class="w-20 border p-2 rounded-xl text-right font-bold" value="0" />
             <button class="qty-btn px-3 py-2 rounded-lg bg-gray-200 font-bold" data-step="1" data-idx="${idx}">+</button>
           </div>
-        </div>`).join('');
+        </div>`;
+
+    const mainEntries = items.map((it, idx) => ({ it, idx })).filter(x => x.it.pinned);
+    const otherEntries = items.map((it, idx) => ({ it, idx })).filter(x => !x.it.pinned);
+
+    // 만약 모든 품목이 기본표시 해제되어 있다면 전체를 기본 영역에 표시
+    if (mainEntries.length === 0) {
+      shipMainItems.innerHTML = items.map((it, idx) => renderShipItemCard(it, idx)).join('');
+      shipOtherSection.classList.add('hidden');
+    } else {
+      shipMainItems.innerHTML = mainEntries.map(x => renderShipItemCard(x.it, x.idx)).join('');
+      if (otherEntries.length > 0) {
+        shipOtherSection.classList.remove('hidden');
+        shipOtherItems.innerHTML = otherEntries.map(x => renderShipItemCard(x.it, x.idx)).join('');
+      } else {
+        shipOtherSection.classList.add('hidden');
+      }
+    }
+
+    let otherExpanded = false;
+    function updateOtherItemsToggleUI(){
+      if (!otherEntries.length) return;
+      let activeOtherCount = 0;
+      shipOtherItems.querySelectorAll('input[type="number"]').forEach(inp => {
+        if (num(inp.value) !== 0) activeOtherCount++;
+      });
+      if (otherExpanded) {
+        shipOtherItems.classList.remove('hidden');
+        toggleOtherItemsText.innerText = `▲ 기타 품목 접기 (${otherEntries.length}개)`;
+      } else {
+        shipOtherItems.classList.add('hidden');
+        toggleOtherItemsText.innerText = `▼ 기타 품목 펼치기 (${otherEntries.length}개)`;
+      }
+      if (activeOtherCount > 0) {
+        otherItemsBadge.classList.remove('hidden');
+        otherItemsBadge.innerText = `입력 ${activeOtherCount}건`;
+      } else {
+        otherItemsBadge.classList.add('hidden');
+      }
+    }
+
+    if (toggleOtherItemsBtn) {
+      toggleOtherItemsBtn.onclick = () => {
+        otherExpanded = !otherExpanded;
+        updateOtherItemsToggleUI();
+      };
+    }
 
     const collectBoxes = document.getElementById('collectBoxes');
     collectBoxes.innerHTML = CONTAINER_TYPES.map(t => `
@@ -543,6 +605,9 @@ function show(name){
         const found = (editingRecord.items || []).find(x => x.name === name);
         if (found) inp.value = found.qty;
       });
+      // 기타 품목에 수량이 있으면 자동으로 펼쳐서 보여주기
+      const hasOtherQty = Array.from(shipOtherItems.querySelectorAll('input[type="number"]')).some(inp => num(inp.value) !== 0);
+      if (hasOtherQty) otherExpanded = true;
       // 수거 공병/크레이트 복원
       collectBoxes.querySelectorAll('input[data-ct]').forEach(inp => {
         const k = inp.dataset.ct;
@@ -552,6 +617,8 @@ function show(name){
       });
     }
 
+    updateOtherItemsToggleUI();
+    applyWarehouseStyles();
 
     function calcShipTotal(){
       let total = 0;
@@ -565,6 +632,7 @@ function show(name){
         total += q * price;
       });
       document.getElementById('shipTotal').innerText = money(total);
+      updateOtherItemsToggleUI();
       return total;
     }
 
@@ -1446,12 +1514,17 @@ function show(name){
         </div>
 
         <div class="bg-white rounded-2xl shadow p-4 space-y-3">
-          <div class="font-extrabold">품목 목록</div>
-          <div class="text-sm text-gray-500">명성/음봉 단가를 각각 편집할 수 있습니다.</div>
-          <div id="itemsTable" class="space-y-2"></div>
-          <div class="flex gap-2">
-            <button id="addItem" class="rounded-xl bg-emerald-600 text-white font-bold py-2 px-4">+ 품목 추가</button>
-            <button id="saveItems" class="rounded-xl bg-blue-600 text-white font-bold py-2 px-4">저장</button>
+          <div class="flex items-center justify-between">
+            <div class="font-extrabold text-lg">📦 품목 목록 및 출고 순서</div>
+            <span class="text-xs px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 font-bold">⭐ 기본표시 = 출고 첫 화면 노출</span>
+          </div>
+          <div class="text-sm text-gray-500">
+            <span class="font-semibold text-gray-700">▲/▼ 버튼</span>으로 표시 순서를 바꾸고, 자주 출고하는 품목(예: 18.9L, 500ml)은 <span class="font-semibold text-amber-700">⭐ 기본표시</span>로 켜두세요. 나머지 품목은 출고 화면에서 '기타 품목 펼치기' 안에 깔끔하게 접혀 있습니다.
+          </div>
+          <div id="itemsTable" class="space-y-2.5"></div>
+          <div class="flex gap-2 pt-1">
+            <button id="addItem" class="flex-1 rounded-xl bg-emerald-600 text-white font-bold py-3 px-4 shadow">+ 새 품목 추가</button>
+            <button id="saveItems" class="flex-1 rounded-xl bg-blue-600 text-white font-extrabold py-3 px-4 shadow">품목/단가 저장</button>
           </div>
         </div>
 
@@ -1510,32 +1583,87 @@ function show(name){
       alert('음봉 정산 초기화 완료');
     };
 
+    bindAutoSelectInput(document.getElementById('setRate'));
+    bindAutoSelectInput(document.getElementById('setTruck'));
+
     const table = document.getElementById('itemsTable');
     function drawItems(){
       table.innerHTML = '';
       items.forEach((it, idx) => {
+        const isPinned = !!it.pinned;
         const row = document.createElement('div');
-        row.className = 'grid grid-cols-1 md:grid-cols-5 gap-2 bg-gray-50 border rounded-2xl p-3';
+        row.className = `border rounded-2xl p-3 space-y-2.5 transition ${isPinned ? 'bg-amber-50/60 border-amber-300' : 'bg-gray-50 border-gray-200'}`;
         row.innerHTML = `
-          <input data-i="${idx}" data-f="name" class="border p-2 rounded-xl" value="${it.name}" ${it.lock ? 'disabled' : ''} />
-          <input data-i="${idx}" data-f="m" type="number" class="border p-2 rounded-xl" value="${num(it.myeongseong)}" />
-          <input data-i="${idx}" data-f="e" type="number" class="border p-2 rounded-xl" value="${num(it.eumbong)}" />
-          <div class="text-sm text-gray-500 flex items-center">명성/음봉 단가</div>
-          <button class="rounded-xl bg-slate-800 text-white font-bold py-2" ${it.lock ? 'disabled' : ''} data-del="${idx}">삭제</button>
+          <div class="flex items-center gap-2">
+            <span class="w-7 h-7 rounded-full bg-slate-700 text-white text-xs font-extrabold flex items-center justify-center flex-shrink-0">${idx + 1}</span>
+            <input data-i="${idx}" data-f="name" class="flex-1 min-w-0 border p-2 rounded-xl font-bold bg-white ${it.lock ? 'text-gray-500 bg-gray-100' : ''}" value="${it.name}" ${it.lock ? 'disabled' : ''} placeholder="품목명" />
+            <button type="button" data-pin="${idx}" class="px-2.5 py-2 rounded-xl text-xs font-extrabold border whitespace-nowrap flex-shrink-0 ${isPinned ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-sm' : 'bg-white text-gray-500 border-gray-300'}">
+              ${isPinned ? '⭐ 기본표시' : '☆ 기타접기'}
+            </button>
+            <div class="flex items-center gap-1 flex-shrink-0">
+              <button type="button" data-move="up" data-idx="${idx}" class="w-8 h-9 rounded-lg border bg-white font-extrabold text-sm ${idx === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-100'}" ${idx === 0 ? 'disabled' : ''}>▲</button>
+              <button type="button" data-move="down" data-idx="${idx}" class="w-8 h-9 rounded-lg border bg-white font-extrabold text-sm ${idx === items.length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-100'}" ${idx === items.length - 1 ? 'disabled' : ''}>▼</button>
+            </div>
+            <button type="button" class="px-2.5 py-2 rounded-xl bg-slate-800 text-white text-xs font-bold flex-shrink-0 ${it.lock ? 'opacity-30 cursor-not-allowed' : ''}" ${it.lock ? 'disabled' : ''} data-del="${idx}">삭제</button>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="flex items-center bg-white border border-rose-200 rounded-xl px-3 py-1.5">
+              <span class="text-xs font-extrabold text-rose-700 whitespace-nowrap mr-2">명성 단가</span>
+              <input data-i="${idx}" data-f="m" type="number" class="w-full text-right font-bold outline-none bg-transparent" value="${num(it.myeongseong)}" ${it.lock ? 'disabled' : ''} />
+              <span class="text-xs text-gray-400 ml-1">원</span>
+            </div>
+            <div class="flex items-center bg-white border border-sky-200 rounded-xl px-3 py-1.5">
+              <span class="text-xs font-extrabold text-sky-700 whitespace-nowrap mr-2">음봉 단가</span>
+              <input data-i="${idx}" data-f="e" type="number" class="w-full text-right font-bold outline-none bg-transparent" value="${num(it.eumbong)}" />
+              <span class="text-xs text-gray-400 ml-1">원</span>
+            </div>
+          </div>
         `;
         table.appendChild(row);
       });
 
-      table.querySelectorAll('button[data-del]').forEach(btn => {
+      // 숫자 입력칸 자동 전체선택 + 엔터시 키보드 닫기 적용
+      table.querySelectorAll('input[type="number"]').forEach(inp => bindAutoSelectInput(inp));
+
+      // ⭐ 기본표시 / 기타접기 토글 (즉시 저장 반영)
+      table.querySelectorAll('button[data-pin]').forEach(btn => {
         btn.onclick = () => {
-          const idx = Number(btn.dataset.del);
-          if (!items[idx] || items[idx].lock) return;
-          if (!confirm('이 품목을 삭제할까요?')) return;
-          items.splice(idx, 1);
+          const idx = Number(btn.dataset.pin);
+          if (!items[idx]) return;
+          items[idx].pinned = !items[idx].pinned;
+          saveJSON(KEYS.items, items);
           drawItems();
         };
       });
 
+      // ▲ / ▼ 순서 이동 (즉시 저장 반영)
+      table.querySelectorAll('button[data-move]').forEach(btn => {
+        btn.onclick = () => {
+          const idx = Number(btn.dataset.idx);
+          const dir = btn.dataset.move;
+          const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
+          if (targetIdx < 0 || targetIdx >= items.length) return;
+          const temp = items[idx];
+          items[idx] = items[targetIdx];
+          items[targetIdx] = temp;
+          saveJSON(KEYS.items, items);
+          drawItems();
+        };
+      });
+
+      // 품목 삭제 (즉시 저장 반영)
+      table.querySelectorAll('button[data-del]').forEach(btn => {
+        btn.onclick = () => {
+          const idx = Number(btn.dataset.del);
+          if (!items[idx] || items[idx].lock) return;
+          if (!confirm(`'${items[idx].name}' 품목을 삭제할까요?`)) return;
+          items.splice(idx, 1);
+          saveJSON(KEYS.items, items);
+          drawItems();
+        };
+      });
+
+      // 이름 / 단가 수정 시 실시간 반영 및 자동 저장
       table.querySelectorAll('input[data-f]').forEach(inp => {
         inp.oninput = () => {
           const i = Number(inp.dataset.i);
@@ -1543,6 +1671,7 @@ function show(name){
           if (f === 'name') items[i].name = inp.value;
           if (f === 'm') items[i].myeongseong = num(inp.value);
           if (f === 'e') items[i].eumbong = num(inp.value);
+          saveJSON(KEYS.items, items);
         };
       });
     }
@@ -1550,7 +1679,8 @@ function show(name){
     drawItems();
 
     document.getElementById('addItem').onclick = () => {
-      items.push({ name:'새 품목', myeongseong:0, eumbong:0 });
+      items.push({ name:'새 품목', myeongseong:0, eumbong:0, pinned:false });
+      saveJSON(KEYS.items, items);
       drawItems();
     };
 
@@ -1591,6 +1721,7 @@ function show(name){
         try {
           const data = JSON.parse(reader.result);
           items = data.items || items;
+          normalizeItemsData();
           outgoRecords = data.outgoRecords || [];
           inboundRecords = data.inboundRecords || [];
           myStock = data.myStock || myStock;
@@ -1623,7 +1754,7 @@ function show(name){
       const keysToRemove = [KEYS.items, KEYS.outgo, KEYS.inbound, KEYS.myStock, KEYS.containerHeld, KEYS.settlement, KEYS.personalRate, KEYS.truckSize];
       keysToRemove.forEach(k => localStorage.removeItem(k));
       // reset runtime state
-      items = DEFAULT_ITEMS;
+      items = JSON.parse(JSON.stringify(DEFAULT_ITEMS));
       outgoRecords = [];
       inboundRecords = [];
       myStock = { '18.9L': 0 };
