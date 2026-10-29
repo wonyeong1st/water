@@ -222,7 +222,9 @@ function bindLongPress(el, onLong){
     containerHeld: 'containerHeld',
     settlement: 'settlement',
     personalRate: 'personalRate189',
-    truckSize: 'truckSize864'
+    truckSize: 'truckSize864',
+    lastSettled: 'lastSettledDate',
+    priceSchedule: 'priceScheduleData'
   };
 
   const DEFAULT_ITEMS = [
@@ -274,8 +276,33 @@ function bindLongPress(el, onLong){
   let myStock = loadJSON(KEYS.myStock, { '18.9L': 0 });
   let containerHeld = loadJSON(KEYS.containerHeld, { 명성:{}, 음봉:{} });
   let settlement = loadJSON(KEYS.settlement, { myeong:0, eumbong:0 });
+  let lastSettled = loadJSON(KEYS.lastSettled, { 명성:'', 음봉:'' });
+  let priceSchedule = loadJSON(KEYS.priceSchedule, { personalRate: null, items: null });
   let personalRate = num(localStorage.getItem(KEYS.personalRate) || 1800);
   let truckSize = num(localStorage.getItem(KEYS.truckSize) || 864);
+
+  // 전표 날짜(dateStr) 기준으로 유효한 개인재고 18.9L 단가 반환
+  function getEffectivePersonalRate(dateStr){
+    const d = dateStr || todayISO();
+    const sched = priceSchedule && priceSchedule.personalRate;
+    if (sched && sched.applyFrom && d < sched.applyFrom && sched.prevRate !== undefined) {
+      return num(sched.prevRate);
+    }
+    return num(personalRate);
+  }
+
+  // 전표 날짜(dateStr) 및 창고(wh) 기준으로 유효한 품목 단가 반환
+  function getEffectiveItemPrice(it, wh, dateStr){
+    if (!it) return 0;
+    if (wh === '명성' && it.name === '18.9L') return 0;
+    const d = dateStr || todayISO();
+    const sched = priceSchedule && priceSchedule.items;
+    if (sched && sched.applyFrom && d < sched.applyFrom && sched.prevItems && sched.prevItems[it.name]) {
+      const prev = sched.prevItems[it.name];
+      return wh === '명성' ? num(prev.myeongseong) : num(prev.eumbong);
+    }
+    return wh === '명성' ? num(it.myeongseong) : num(it.eumbong);
+  }
 
   // ensure containerHeld structure
   for (const wh of ['명성','음봉']) {
@@ -526,11 +553,17 @@ function show(name){
     const toggleOtherItemsText = document.getElementById('toggleOtherItemsText');
     const otherItemsBadge = document.getElementById('otherItemsBadge');
 
-    const renderShipItemCard = (it, idx) => `
+    const getShipDateVal = () => (document.getElementById('shipDate') && document.getElementById('shipDate').value) || todayISO();
+
+    const renderShipItemCard = (it, idx) => {
+      const d = getShipDateVal();
+      const mPrice = getEffectiveItemPrice(it, '명성', d);
+      const ePrice = getEffectiveItemPrice(it, '음봉', d);
+      return `
         <div class="bg-white border rounded-2xl p-3 flex items-center justify-between gap-2">
           <div>
             <div class="font-bold">${it.name}</div>
-            <div class="text-xs text-gray-500">명성: ${num(it.myeongseong).toLocaleString()} / 음봉: ${num(it.eumbong).toLocaleString()}</div>
+            <div class="text-xs text-gray-500" data-price-label="${idx}">명성: ${num(mPrice).toLocaleString()} / 음봉: ${num(ePrice).toLocaleString()}</div>
           </div>
           <div class="flex items-center gap-1">
             <button class="qty-btn px-3 py-2 rounded-lg bg-gray-200 font-bold" data-step="-1" data-idx="${idx}">−</button>
@@ -538,6 +571,7 @@ function show(name){
             <button class="qty-btn px-3 py-2 rounded-lg bg-gray-200 font-bold" data-step="1" data-idx="${idx}">+</button>
           </div>
         </div>`;
+    };
 
     const mainEntries = items.map((it, idx) => ({ it, idx })).filter(x => x.it.pinned);
     const otherEntries = items.map((it, idx) => ({ it, idx })).filter(x => !x.it.pinned);
@@ -620,21 +654,38 @@ function show(name){
     updateOtherItemsToggleUI();
     applyWarehouseStyles();
 
+    function refreshShipPriceLabels(){
+      const d = getShipDateVal();
+      shipItems.querySelectorAll('[data-price-label]').forEach(el => {
+        const idx = Number(el.dataset.priceLabel);
+        const it = items[idx];
+        if (!it) return;
+        const mPrice = getEffectiveItemPrice(it, '명성', d);
+        const ePrice = getEffectiveItemPrice(it, '음봉', d);
+        el.innerText = `명성: ${num(mPrice).toLocaleString()} / 음봉: ${num(ePrice).toLocaleString()}`;
+      });
+    }
+
     function calcShipTotal(){
+      const d = getShipDateVal();
       let total = 0;
       shipItems.querySelectorAll('input[type="number"]').forEach(inp => {
         const idx = Number(inp.dataset.idx);
         const q = num(inp.value);
         if (q === 0) return;
         const it = items[idx];
-        let price = selectedWarehouse === '명성' ? num(it.myeongseong) : num(it.eumbong);
-        if (selectedWarehouse === '명성' && it.name === '18.9L') price = 0;
+        const price = getEffectiveItemPrice(it, selectedWarehouse, d);
         total += q * price;
       });
       document.getElementById('shipTotal').innerText = money(total);
       updateOtherItemsToggleUI();
       return total;
     }
+
+    document.getElementById('shipDate').addEventListener('change', () => {
+      refreshShipPriceLabels();
+      calcShipTotal();
+    });
 
     shipItems.addEventListener('input', calcShipTotal);
 
@@ -705,13 +756,13 @@ function show(name){
                 myStock['18.9L'] = num(myStock['18.9L']) + num(ln.qty);
               } else {
                 const it = items.find(x => x.name === ln.name) || {};
-                settlement.myeong -= num(ln.qty) * num(it.myeongseong);
+                settlement.myeong -= num(ln.qty) * getEffectiveItemPrice(it, '명성', r.date);
               }
             }
           } else {
             for (const ln of r.items) {
               const it = items.find(x => x.name === ln.name) || {};
-              settlement.eumbong -= num(ln.qty) * num(it.eumbong);
+              settlement.eumbong -= num(ln.qty) * getEffectiveItemPrice(it, '음봉', r.date);
             }
           }
         }
@@ -724,7 +775,7 @@ function show(name){
       
       }
 
-      // ➕ 신규(또는 수정 후) 반영
+      // ➕ 신규(또는 수정 후) 반영 (해당 전표 날짜의 유효 단가 적용)
       if (lines.length > 0) {
         if (wh === '명성') {
           for (const ln of lines) {
@@ -732,13 +783,13 @@ function show(name){
               myStock['18.9L'] = num(myStock['18.9L']) - num(ln.qty);
             } else {
               const it = items.find(x => x.name === ln.name) || {};
-              settlement.myeong += num(ln.qty) * num(it.myeongseong);
+              settlement.myeong += num(ln.qty) * getEffectiveItemPrice(it, '명성', date);
             }
           }
         } else {
           for (const ln of lines) {
             const it = items.find(x => x.name === ln.name) || {};
-            settlement.eumbong += num(ln.qty) * num(it.eumbong);
+            settlement.eumbong += num(ln.qty) * getEffectiveItemPrice(it, '음봉', date);
           }
         }
       }
@@ -862,8 +913,13 @@ function show(name){
     }
     document.getElementById('truckSize').value = truckSize;
     document.getElementById('pDate').value = todayISO();
-    document.getElementById('pRate').value = personalRate;
+    document.getElementById('pRate').value = getEffectivePersonalRate(todayISO());
     document.getElementById('pTruck').value = truckSize;
+    document.getElementById('pDate').addEventListener('change', (e) => {
+      if (!window.editingInboundRecord) {
+        document.getElementById('pRate').value = getEffectivePersonalRate(e.target.value);
+      }
+    });
 
     // build return grid
     // ✏ 반납 전표 수정 모드: 수량 자동 채움
@@ -974,14 +1030,13 @@ function show(name){
     // personal inbound
     document.getElementById('pTruckBtn').onclick = () => {
       const date = document.getElementById('pDate').value || todayISO();
-      personalRate = num(document.getElementById('pRate').value) || personalRate;
-      localStorage.setItem(KEYS.personalRate, String(personalRate));
+      const rateToUse = num(document.getElementById('pRate').value) || getEffectivePersonalRate(date);
       const qty = num(document.getElementById('pTruck').value);
       if (!qty) return alert('한 차 수량이 0입니다.');
       if (!confirm(`${qty}개 한 차 입고 처리 할까요?`)) return;
 
       myStock['18.9L'] = num(myStock['18.9L']) + qty;
-      settlement.eumbong += qty * personalRate;
+      settlement.eumbong += qty * rateToUse;
 
       // ✏ 수정 모드: 기존 개인 입고 전표 롤백
       if (window.editingInboundRecord && window.editingInboundRecord.type === 'personal_inbound') {
@@ -991,7 +1046,7 @@ function show(name){
         inboundRecords = inboundRecords.filter(x => x.id !== r.id);
       }
 
-      const rec = { id: uid(), date, type: 'personal_inbound', qty, unitPrice: personalRate, amount: qty*personalRate };
+      const rec = { id: uid(), date, type: 'personal_inbound', qty, unitPrice: rateToUse, amount: qty*rateToUse };
       inboundRecords.push(rec);
 
       saveJSON(KEYS.myStock, myStock);
@@ -1003,20 +1058,19 @@ function show(name){
 
       syncHeader();
       alert(`개인 재고 입고 완료 (+${qty})
-음봉 정산 +${money(qty*personalRate)}`);
+음봉 정산 +${money(qty*rateToUse)}`);
       show('home');
     };
 
     document.getElementById('pQtyBtn').onclick = () => {
       const date = document.getElementById('pDate').value || todayISO();
-      personalRate = num(document.getElementById('pRate').value) || personalRate;
-      localStorage.setItem(KEYS.personalRate, String(personalRate));
+      const rateToUse = num(document.getElementById('pRate').value) || getEffectivePersonalRate(date);
       const qty = num(document.getElementById('pQty').value);
       if (!qty) return alert('수량을 입력해주세요.');
       if (!confirm(`${qty}개 입고 처리 할까요?`)) return;
 
       myStock['18.9L'] = num(myStock['18.9L']) + qty;
-      settlement.eumbong += qty * personalRate;
+      settlement.eumbong += qty * rateToUse;
 
       // ✏ 수정 모드: 기존 개인 입고 전표 롤백
       if (window.editingInboundRecord && window.editingInboundRecord.type === 'personal_inbound') {
@@ -1026,7 +1080,7 @@ function show(name){
         inboundRecords = inboundRecords.filter(x => x.id !== r.id);
       }
 
-      const rec = { id: uid(), date, type: 'personal_inbound', qty, unitPrice: personalRate, amount: qty*personalRate };
+      const rec = { id: uid(), date, type: 'personal_inbound', qty, unitPrice: rateToUse, amount: qty*rateToUse };
       inboundRecords.push(rec);
 
       saveJSON(KEYS.myStock, myStock);
@@ -1038,9 +1092,21 @@ function show(name){
 
       syncHeader();
       alert(`개인 재고 입고 완료 (+${qty})
-음봉 정산 +${money(qty*personalRate)}`);
+음봉 정산 +${money(qty*rateToUse)}`);
       show('home');
     };
+
+    function refreshHeld(){
+      const whEl = document.getElementById('retWarehouse');
+      const wh = whEl ? whEl.value : '명성';
+      CONTAINER_TYPES.forEach(t => {
+        const span = document.getElementById(`held_${t.key}`);
+        if (span) span.innerText = (containerHeld[wh] && containerHeld[wh][t.key]) || 0;
+      });
+    }
+    const retWhEl = document.getElementById('retWarehouse');
+    if (retWhEl) retWhEl.onchange = refreshHeld;
+    el.querySelectorAll('input[type="number"]').forEach(inp => bindAutoSelectInput(inp));
 
     refreshHeld();
   }
@@ -1232,13 +1298,13 @@ function show(name){
                 myStock['18.9L'] = num(myStock['18.9L']) + num(ln.qty);
               } else {
                 const it = items.find(x=>x.name===ln.name)||{};
-                settlement.myeong -= num(ln.qty) * num(it.myeongseong);
+                settlement.myeong -= num(ln.qty) * getEffectiveItemPrice(it, '명성', record.date);
               }
             }
           } else {
             for(const ln of record.items){
               const it = items.find(x=>x.name===ln.name)||{};
-              settlement.eumbong -= num(ln.qty) * num(it.eumbong);
+              settlement.eumbong -= num(ln.qty) * getEffectiveItemPrice(it, '음봉', record.date);
             }
           }
         }
@@ -1419,9 +1485,14 @@ function show(name){
         }
       } else {
         const summary = {};
+        const summaryAmt = {};
         for (const r of filtered) {
           for (const it of (r.items || [])) {
-            summary[it.name] = (summary[it.name] || 0) + num(it.qty);
+            const q = num(it.qty);
+            summary[it.name] = (summary[it.name] || 0) + q;
+            const info = items.find(x => x.name === it.name) || {};
+            const price = getEffectiveItemPrice(info, warehouse, r.date);
+            summaryAmt[it.name] = (summaryAmt[it.name] || 0) + (q * price);
           }
         }
 
@@ -1431,9 +1502,7 @@ function show(name){
         let rows = '';
         for (const name of Object.keys(summary)) {
           const qty = summary[name];
-          const info = items.find(x => x.name === name) || {};
-          const price = warehouse === '명성' ? num(info.myeongseong) : num(info.eumbong);
-          const sum = qty * price;
+          const sum = summaryAmt[name] || 0;
           total += sum;
           rows += `<div class='flex justify-between py-1 border-b'><div>${name} <span class='text-gray-500 text-sm'>(${qty}개)</span></div><div class='font-semibold'>${money(sum)}</div></div>`;
         }
@@ -1488,7 +1557,8 @@ function show(name){
       <div class="space-y-4">
         <div class="bg-white rounded-2xl shadow p-4 space-y-3">
           <div class="text-xl font-extrabold">⚙ 설정 (품목/단가)</div>
-          <div class="text-sm text-gray-500">단가/품목은 수년에 한 번 바뀔 수 있으니 수정 가능하도록 합니다.</div>
+          <div class="text-sm text-gray-500">단가 변경 시 저장 버튼을 누르면 <b>적용 시작일(예: 다음 달 1일)</b>을 지정해 예약 반영할 수 있습니다.</div>
+          <div id="scheduleStatusBanner" class="hidden"></div>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div class="bg-gray-50 border rounded-2xl p-3">
@@ -1500,10 +1570,16 @@ function show(name){
               <input id="setTruck" type="number" class="w-full border p-2 rounded-xl mt-2" />
             </div>
             <div class="bg-gray-50 border rounded-2xl p-3">
-              <div class="text-sm text-gray-500">정산 입금 확인</div>
+              <div class="text-sm text-gray-500">정산 입금 처리 (기간 지정 차감)</div>
               <div class="flex flex-col gap-2 mt-2">
-                <button id="resetMyeong" class="w-full rounded-xl bg-rose-600 text-white font-bold py-2 text-sm">명성 입금 완료(0원)</button>
-                <button id="resetEumbong" class="w-full rounded-xl bg-blue-600 text-white font-bold py-2 text-sm">음봉 입금 완료(0원)</button>
+                <button id="resetMyeong" class="w-full rounded-xl bg-rose-600 text-white font-bold py-2.5 px-3 text-sm flex items-center justify-between shadow-sm">
+                  <span>명성 입금 완료</span>
+                  <span id="setSumM" class="text-xs bg-rose-800/60 px-2 py-0.5 rounded-lg font-extrabold">${money(settlement.myeong)}</span>
+                </button>
+                <button id="resetEumbong" class="w-full rounded-xl bg-blue-600 text-white font-bold py-2.5 px-3 text-sm flex items-center justify-between shadow-sm">
+                  <span>음봉 입금 완료</span>
+                  <span id="setSumE" class="text-xs bg-blue-800/60 px-2 py-0.5 rounded-lg font-extrabold">${money(settlement.eumbong)}</span>
+                </button>
               </div>
             </div>
           </div>
@@ -1548,40 +1624,436 @@ function show(name){
       </div>
     `;
 
+    // 설정 화면 진입 시점의 '오늘 유효 단가' 스냅샷 보관 (예약 적용일 이전 전표에 사용할 기존 단가)
+    const activePersonalRateToday = getEffectivePersonalRate(todayISO());
+    const activeItemsPriceMapToday = {};
+    items.forEach(it => {
+      activeItemsPriceMapToday[it.name] = {
+        myeongseong: getEffectiveItemPrice(it, '명성', todayISO()),
+        eumbong: getEffectiveItemPrice(it, '음봉', todayISO())
+      };
+    });
+
     document.getElementById('setRate').value = personalRate;
     document.getElementById('setTruck').value = truckSize;
 
+    function refreshScheduleBanner(){
+      const banner = document.getElementById('scheduleStatusBanner');
+      if (!banner) return;
+      const todayStr = todayISO();
+      const notices = [];
+      if (priceSchedule && priceSchedule.personalRate && priceSchedule.personalRate.applyFrom > todayStr) {
+        notices.push(`• 개인재고 18.9L 입고 단가: <b>${priceSchedule.personalRate.applyFrom}</b>부터 <b>${money(personalRate)}</b> 적용 (그전까지 ${money(priceSchedule.personalRate.prevRate)})`);
+      }
+      if (priceSchedule && priceSchedule.items && priceSchedule.items.applyFrom > todayStr) {
+        notices.push(`• 품목 출고 단가: <b>${priceSchedule.items.applyFrom}</b>부터 새 단가 적용 (그전까지 기존 단가 자동 적용)`);
+      }
+      if (notices.length > 0) {
+        banner.className = 'bg-amber-50 border border-amber-300 rounded-2xl p-3 text-xs text-amber-900 space-y-1';
+        banner.innerHTML = `
+          <div class="font-extrabold text-amber-800">⏰ 단가 변경 예약 안내</div>
+          ${notices.map(n => `<div>${n}</div>`).join('')}
+        `;
+      } else {
+        banner.className = 'hidden';
+        banner.innerHTML = '';
+      }
+    }
+    refreshScheduleBanner();
+
+    // 단가 적용 시작일("몇 월 며칠부터 반영할까요?") 선택 팝업
+    function openEffectiveDateModal(options){
+      const { title, desc, syncOptionLabel, onConfirm } = options;
+      const now = new Date();
+      const todayStr = toLocalISO(now);
+      const tomorrowStr = toLocalISO(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+      const nextMonthFirstStr = toLocalISO(new Date(now.getFullYear(), now.getMonth() + 1, 1));
+
+      const overlay = document.createElement('div');
+      overlay.className = 'slip-action-menu p-3';
+      overlay.innerHTML = `
+        <div class="bg-white rounded-2xl p-4 w-full max-w-md shadow-2xl space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="text-lg font-extrabold text-blue-700">📅 ${title}</div>
+            <button type="button" id="edCloseX" class="w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-extrabold">✕</button>
+          </div>
+
+          <div class="text-sm font-bold text-gray-800">${desc || '변경한 단가를 몇 월 며칠부터 반영할까요?'}</div>
+          <div class="text-xs text-gray-500 leading-relaxed">
+            지정한 날짜 이전의 전표를 입력할 때는 <b>기존 단가</b>가 유지되고, 지정한 날짜부터 자동으로 <b>새 단가</b>가 적용됩니다. (이미 작성된 과거 전표 금액에는 영향이 없습니다.)
+          </div>
+
+          <!-- 빠른 날짜 선택 단추 -->
+          <div class="grid grid-cols-3 gap-1.5">
+            <button type="button" id="edNextMonth" class="py-2 px-2 rounded-xl bg-blue-100 text-blue-900 text-xs font-extrabold border-2 border-blue-500">다음 달 1일부터</button>
+            <button type="button" id="edToday" class="py-2 px-2 rounded-xl bg-gray-100 text-gray-800 text-xs font-bold border border-gray-300">오늘부터 즉시</button>
+            <button type="button" id="edTomorrow" class="py-2 px-2 rounded-xl bg-gray-100 text-gray-800 text-xs font-bold border border-gray-300">내일부터</button>
+          </div>
+
+          <div class="bg-gray-50 p-3 rounded-xl border border-gray-200">
+            <label class="text-xs font-extrabold text-gray-700 block mb-1">적용 시작일 선택</label>
+            <input type="date" id="edDateInput" class="w-full border border-gray-300 p-2.5 rounded-xl text-base font-extrabold bg-white" value="${nextMonthFirstStr}" />
+          </div>
+
+          ${syncOptionLabel ? `
+          <label class="flex items-center gap-2 bg-amber-50 border border-amber-300 rounded-xl p-3 cursor-pointer">
+            <input type="checkbox" id="edSyncCheck" class="w-4 h-4 rounded" checked />
+            <span class="text-xs font-extrabold text-amber-950">${syncOptionLabel}</span>
+          </label>
+          ` : ''}
+
+          <div class="grid grid-cols-2 gap-2 pt-1">
+            <button type="button" id="edConfirmBtn" class="rounded-xl bg-blue-600 text-white font-extrabold py-3 text-sm shadow">적용일 지정 저장</button>
+            <button type="button" id="edCancelBtn" class="rounded-xl bg-gray-200 text-gray-800 font-bold py-3 text-sm">취소</button>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(overlay);
+
+      const dateInp = overlay.querySelector('#edDateInput');
+      const btnNext = overlay.querySelector('#edNextMonth');
+      const btnToday = overlay.querySelector('#edToday');
+      const btnTom = overlay.querySelector('#edTomorrow');
+
+      function highlightQuick(activeBtn){
+        [btnNext, btnToday, btnTom].forEach(b => {
+          b.className = 'py-2 px-2 rounded-xl bg-gray-100 text-gray-800 text-xs font-bold border border-gray-300';
+        });
+        if (activeBtn) {
+          activeBtn.className = 'py-2 px-2 rounded-xl bg-blue-100 text-blue-900 text-xs font-extrabold border-2 border-blue-500';
+        }
+      }
+
+      btnNext.onclick = () => { dateInp.value = nextMonthFirstStr; highlightQuick(btnNext); };
+      btnToday.onclick = () => { dateInp.value = todayStr; highlightQuick(btnToday); };
+      btnTom.onclick = () => { dateInp.value = tomorrowStr; highlightQuick(btnTom); };
+      dateInp.oninput = () => highlightQuick(null);
+
+      function close(){ overlay.remove(); }
+      overlay.querySelector('#edCloseX').onclick = close;
+      overlay.querySelector('#edCancelBtn').onclick = close;
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+      overlay.querySelector('#edConfirmBtn').onclick = () => {
+        const applyFrom = dateInp.value || todayStr;
+        const syncChecked = overlay.querySelector('#edSyncCheck') ? overlay.querySelector('#edSyncCheck').checked : false;
+        close();
+        onConfirm(applyFrom, syncChecked);
+      };
+    }
+
     document.getElementById('saveBasics').onclick = () => {
-      personalRate = num(document.getElementById('setRate').value) || personalRate;
-      truckSize = num(document.getElementById('setTruck').value) || truckSize;
-      localStorage.setItem(KEYS.personalRate, String(personalRate));
+      const newRate = num(document.getElementById('setRate').value) || personalRate;
+      const newTruck = num(document.getElementById('setTruck').value) || truckSize;
+      truckSize = newTruck;
       localStorage.setItem(KEYS.truckSize, String(truckSize));
-      alert('저장되었습니다.');
+
+      openEffectiveDateModal({
+        title: '기본값(18.9L 단가) 저장',
+        desc: `개인재고 18.9L 단가(${money(newRate)})를 몇 월 며칠부터 반영할까요?`,
+        syncOptionLabel: `품목 목록의 '18.9L 음봉 출고 단가'도 ${money(newRate)}으로 함께 변경`,
+        onConfirm: (applyFrom, sync189Eumbong) => {
+          const todayStr = todayISO();
+          personalRate = newRate;
+          localStorage.setItem(KEYS.personalRate, String(personalRate));
+
+          if (applyFrom > todayStr) {
+            priceSchedule.personalRate = {
+              applyFrom,
+              prevRate: activePersonalRateToday,
+              newRate
+            };
+          } else {
+            priceSchedule.personalRate = null;
+          }
+
+          if (sync189Eumbong) {
+            const item189 = items.find(x => x.name === '18.9L');
+            if (item189) {
+              item189.eumbong = newRate;
+              saveJSON(KEYS.items, items);
+              if (applyFrom > todayStr) {
+                const prevMap = (priceSchedule.items && priceSchedule.items.prevItems) ? priceSchedule.items.prevItems : { ...activeItemsPriceMapToday };
+                prevMap['18.9L'] = { ...activeItemsPriceMapToday['18.9L'] };
+                priceSchedule.items = { applyFrom, prevItems: prevMap };
+              }
+              drawItems();
+            }
+          }
+
+          saveJSON(KEYS.priceSchedule, priceSchedule);
+          refreshScheduleBanner();
+          if (applyFrom > todayStr) {
+            alert(`저장 완료!
+
+• 적용 시작일: ${applyFrom}부터 (${money(newRate)})
+• ${applyFrom} 이전 전표는 기존 단가(${money(activePersonalRateToday)})가 자동 적용됩니다.`);
+          } else {
+            alert(`저장 완료!
+오늘(${todayStr})부터 즉시 ${money(newRate)} 단가가 적용됩니다.`);
+          }
+        }
+      });
     };
 
-   // 1. 명성 입금 완료 (명성 정산만 0으로)
-    document.getElementById('resetMyeong').onclick = () => {
-      if (!confirm('명성(25일) 입금을 확인했나요?\n명성 정산 금액만 0원으로 초기화합니다.')) return;
-      
-      settlement.myeong = 0; // 명성만 0으로 설정
-      // 음봉(settlement.eumbong)은 건드리지 않음
-      
-      saveJSON(KEYS.settlement, settlement);
-      syncHeader();
-      alert('명성 정산 초기화 완료');
-    };
+    function refreshSettingsSettlementBadges(){
+      const mEl = document.getElementById('setSumM');
+      const eEl = document.getElementById('setSumE');
+      if (mEl) mEl.innerText = money(settlement.myeong);
+      if (eEl) eEl.innerText = money(settlement.eumbong);
+    }
 
-    // 2. 음봉 입금 완료 (음봉 정산만 0으로)
-    document.getElementById('resetEumbong').onclick = () => {
-      if (!confirm('음봉(말일) 입금을 확인했나요?\n음봉 정산 금액만 0원으로 초기화합니다.')) return;
-      
-      settlement.eumbong = 0; // 음봉만 0으로 설정
-      // 명성(settlement.myeong)은 건드리지 않음
+    function addDaysISO(isoStr, days){
+      const parts = (isoStr || todayISO()).split('-').map(Number);
+      const d = new Date(parts[0], parts[1] - 1, parts[2] + days);
+      return toLocalISO(d);
+    }
 
-      saveJSON(KEYS.settlement, settlement);
-      syncHeader();
-      alert('음봉 정산 초기화 완료');
-    };
+    function openSettlementModal(wh){
+      const isM = (wh === '명성');
+      const currentTotal = isM ? num(settlement.myeong) : num(settlement.eumbong);
+      const now = new Date();
+      const todayStr = toLocalISO(now);
+      const yesterdayStr = toLocalISO(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+      const thisMonthStartStr = toLocalISO(new Date(now.getFullYear(), now.getMonth(), 1));
+      const lastMonthStartStr = toLocalISO(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+      const lastMonthEndStr = toLocalISO(new Date(now.getFullYear(), now.getMonth(), 0));
+
+      // 기본 시작일: 직전 정산 마감일이 있으면 그 다음 날, 없으면 이번 달 1일
+      let defaultStart = (lastSettled && lastSettled[wh]) ? addDaysISO(lastSettled[wh], 1) : thisMonthStartStr;
+      // 기본 마감일: 어제 날짜가 시작일 이후라면 '어제'(당일 출고분 보호), 아니면 '오늘'
+      let defaultEnd = (yesterdayStr >= defaultStart) ? yesterdayStr : todayStr;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'slip-action-menu p-3';
+      overlay.innerHTML = `
+        <div class="bg-white rounded-2xl p-4 w-full max-w-md shadow-2xl space-y-3 max-h-[92vh] overflow-y-auto">
+          <div class="flex items-center justify-between">
+            <div class="text-lg font-extrabold ${isM ? 'text-rose-700' : 'text-blue-700'}">💳 ${wh} 정산 / 입금 완료</div>
+            <button type="button" id="stCloseX" class="w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-extrabold">✕</button>
+          </div>
+
+          <div class="text-xs text-gray-500 leading-relaxed">
+            출고 시작일과 마감일을 지정하면 <b>해당 기간의 합계 금액만 누적 정산금에서 차감</b>되고, 마감일 이후(예: 오늘) 출고분은 그대로 남습니다.
+            ${(lastSettled && lastSettled[wh]) ? `<div class="mt-1 font-bold text-amber-700">📌 직전 정산 마감일: ${lastSettled[wh]}</div>` : ''}
+          </div>
+
+          <!-- 빠른 날짜 선택 단추 -->
+          <div class="grid grid-cols-3 gap-1.5">
+            <button type="button" id="stQuickYesterday" class="py-1.5 px-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold border border-gray-300">어제까지 마감</button>
+            <button type="button" id="stQuickToday" class="py-1.5 px-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold border border-gray-300">오늘까지 마감</button>
+            <button type="button" id="stQuickLastMonth" class="py-1.5 px-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold border border-gray-300">지난달 전체</button>
+          </div>
+
+          <!-- 출고 시작일 / 마감일 입력 -->
+          <div class="grid grid-cols-2 gap-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200">
+            <div>
+              <label class="text-xs font-extrabold text-gray-700 block mb-1">출고 시작일</label>
+              <input type="date" id="stStart" class="w-full border border-gray-300 p-2 rounded-lg text-sm font-bold bg-white" value="${defaultStart}" />
+            </div>
+            <div>
+              <label class="text-xs font-extrabold text-gray-700 block mb-1">출고 마감일</label>
+              <input type="date" id="stEnd" class="w-full border border-gray-300 p-2 rounded-lg text-sm font-bold bg-white" value="${defaultEnd}" />
+            </div>
+          </div>
+
+          <!-- 기간 내 금액 계산 결과 -->
+          <div class="border rounded-2xl p-3 space-y-2 ${isM ? 'bg-rose-50/60 border-rose-200' : 'bg-blue-50/60 border-blue-200'}">
+            <div class="flex justify-between items-center text-sm">
+              <span class="text-gray-700 font-semibold">기간 내 ${wh} 출고 (<span id="stShipCount">0</span>건)</span>
+              <span id="stShipSum" class="font-extrabold text-gray-900">0원</span>
+            </div>
+
+            ${!isM ? `
+            <label class="flex items-center justify-between text-sm pt-1 border-t border-blue-200/70 cursor-pointer">
+              <div class="flex items-center gap-1.5">
+                <input type="checkbox" id="stIncludeInbound" class="w-4 h-4 rounded" checked />
+                <span class="text-gray-700 font-semibold text-xs">기간 내 18.9L 입고 포함 (<span id="stInbCount">0</span>건)</span>
+              </div>
+              <span id="stInbSum" class="font-extrabold text-gray-900 text-sm">0원</span>
+            </label>
+            ` : ''}
+
+            <div class="pt-2 border-t ${isM ? 'border-rose-300' : 'border-blue-300'} flex justify-between items-center">
+              <span class="font-extrabold text-sm ${isM ? 'text-rose-900' : 'text-blue-900'}">선택 기간 정산 합계</span>
+              <span id="stPeriodTotal" class="text-xl font-extrabold ${isM ? 'text-rose-600' : 'text-blue-600'}">0원</span>
+            </div>
+          </div>
+
+          <!-- 정산 후 잔여 누적금 미리보기 -->
+          <div class="bg-gray-50 border border-gray-200 rounded-2xl p-3 space-y-1.5 text-sm">
+            <div class="flex justify-between text-gray-600">
+              <span>현재 ${wh} 정산 누적</span>
+              <span class="font-bold">${money(currentTotal)}</span>
+            </div>
+            <div class="flex justify-between text-gray-900 font-extrabold text-base pt-1 border-t border-gray-200">
+              <span>정산 후 남을 누적금</span>
+              <span id="stRemainTotal" class="text-emerald-700">${money(currentTotal)}</span>
+            </div>
+            <div id="stAfterNote" class="text-xs text-gray-500 pt-0.5"></div>
+          </div>
+
+          <!-- 실행 단추 -->
+          <div class="space-y-2 pt-1">
+            <button type="button" id="stConfirmPeriod" class="w-full rounded-xl ${isM ? 'bg-rose-600' : 'bg-blue-600'} text-white font-extrabold py-3.5 text-base shadow">
+              선택 기간 입금 완료 (차감)
+            </button>
+            <div class="grid grid-cols-2 gap-2">
+              <button type="button" id="stForceZero" class="w-full rounded-xl bg-slate-700 text-white font-bold py-2.5 text-xs">
+                전체 0원으로 초기화
+              </button>
+              <button type="button" id="stCancel" class="w-full rounded-xl bg-gray-200 text-gray-800 font-bold py-2.5 text-xs">
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(overlay);
+
+      const stStart = overlay.querySelector('#stStart');
+      const stEnd = overlay.querySelector('#stEnd');
+      const stIncludeInbound = overlay.querySelector('#stIncludeInbound');
+
+      function close(){
+        overlay.remove();
+      }
+
+      let calcResult = { periodTotal: 0, remainTotal: currentTotal };
+
+      function updateCalc(){
+        const s = stStart.value || '0000-00-00';
+        const e = stEnd.value || '9999-12-31';
+
+        const shipList = outgoRecords.filter(r => r.warehouse === wh && r.date >= s && r.date <= e);
+        const shipSum = shipList.reduce((acc, r) => acc + num(r.total), 0);
+
+        overlay.querySelector('#stShipCount').innerText = shipList.length;
+        overlay.querySelector('#stShipSum').innerText = money(shipSum);
+
+        let inbSum = 0;
+        if (!isM) {
+          const inbList = inboundRecords.filter(r => r.type === 'personal_inbound' && r.date >= s && r.date <= e);
+          const rawInbSum = inbList.reduce((acc, r) => acc + num(r.amount), 0);
+          overlay.querySelector('#stInbCount').innerText = inbList.length;
+          overlay.querySelector('#stInbSum').innerText = money(rawInbSum);
+          if (stIncludeInbound && stIncludeInbound.checked) {
+            inbSum = rawInbSum;
+          }
+        }
+
+        const periodTotal = shipSum + inbSum;
+        const remainTotal = Math.max(0, currentTotal - periodTotal);
+
+        // 마감일 이후(예: 오늘) 발생한 출고/입고 합계 안내
+        const afterShipSum = outgoRecords
+          .filter(r => r.warehouse === wh && r.date > e)
+          .reduce((acc, r) => acc + num(r.total), 0);
+        const afterInbSum = !isM
+          ? inboundRecords.filter(r => r.type === 'personal_inbound' && r.date > e).reduce((acc, r) => acc + num(r.amount), 0)
+          : 0;
+        const afterTotal = afterShipSum + afterInbSum;
+
+        overlay.querySelector('#stPeriodTotal').innerText = money(periodTotal);
+        overlay.querySelector('#stRemainTotal').innerText = money(remainTotal);
+        overlay.querySelector('#stConfirmPeriod').innerText = `선택 기간 입금 완료 (-${money(periodTotal)})`;
+
+        const noteEl = overlay.querySelector('#stAfterNote');
+        if (afterTotal > 0) {
+          noteEl.innerHTML = `💡 마감일(${e}) 이후 발생한 미정산 금액 <b>${money(afterTotal)}</b>이 누적금에 안전하게 남습니다.`;
+        } else {
+          noteEl.innerHTML = `※ 마감일(${e}) 이후에 입력된 출고 내역은 없습니다.`;
+        }
+
+        calcResult = { periodTotal, remainTotal, s, e };
+      }
+
+      stStart.addEventListener('input', updateCalc);
+      stEnd.addEventListener('input', updateCalc);
+      if (stIncludeInbound) stIncludeInbound.addEventListener('change', updateCalc);
+
+      overlay.querySelector('#stQuickYesterday').onclick = () => {
+        stStart.value = (lastSettled && lastSettled[wh]) ? addDaysISO(lastSettled[wh], 1) : thisMonthStartStr;
+        stEnd.value = yesterdayStr;
+        updateCalc();
+      };
+      overlay.querySelector('#stQuickToday').onclick = () => {
+        stStart.value = (lastSettled && lastSettled[wh]) ? addDaysISO(lastSettled[wh], 1) : thisMonthStartStr;
+        stEnd.value = todayStr;
+        updateCalc();
+      };
+      overlay.querySelector('#stQuickLastMonth').onclick = () => {
+        stStart.value = lastMonthStartStr;
+        stEnd.value = lastMonthEndStr;
+        updateCalc();
+      };
+
+      overlay.querySelector('#stCloseX').onclick = close;
+      overlay.querySelector('#stCancel').onclick = close;
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+      overlay.querySelector('#stConfirmPeriod').onclick = () => {
+        const { periodTotal, remainTotal, s, e } = calcResult;
+        if (s > e) {
+          alert('출고 시작일이 마감일보다 늦을 수 없습니다.');
+          return;
+        }
+        if (periodTotal <= 0) {
+          if (!confirm(`선택하신 기간(${s} ~ ${e})의 정산 합계가 0원입니다.
+마감일 기록만 ${e}로 업데이트할까요?`)) return;
+        } else {
+          if (!confirm(`[${wh} 기간 정산 확인]
+
+• 정산 기간: ${s} ~ ${e}
+• 선택 기간 합계: ${money(periodTotal)}
+• 차감 후 남을 누적금: ${money(remainTotal)}
+
+위 금액을 입금(정산) 완료 처리할까요?`)) return;
+        }
+
+        if (isM) {
+          settlement.myeong = remainTotal;
+        } else {
+          settlement.eumbong = remainTotal;
+        }
+        lastSettled[wh] = e;
+        saveJSON(KEYS.settlement, settlement);
+        saveJSON(KEYS.lastSettled, lastSettled);
+        syncHeader();
+        refreshSettingsSettlementBadges();
+        close();
+        alert(`${wh} 기간 정산 완료!
+
+• 차감 금액: ${money(periodTotal)}
+• 남은 누적금: ${money(remainTotal)}`);
+      };
+
+      overlay.querySelector('#stForceZero').onclick = () => {
+        if (!confirm(`기간 계산 없이 현재 ${wh} 정산 누적 금액(${money(currentTotal)})을 모두 0원으로 초기화할까요?`)) return;
+        if (isM) {
+          settlement.myeong = 0;
+        } else {
+          settlement.eumbong = 0;
+        }
+        lastSettled[wh] = todayStr;
+        saveJSON(KEYS.settlement, settlement);
+        saveJSON(KEYS.lastSettled, lastSettled);
+        syncHeader();
+        refreshSettingsSettlementBadges();
+        close();
+        alert(`${wh} 정산 누적 금액이 0원으로 초기화되었습니다.`);
+      };
+
+      updateCalc();
+    }
+
+    // 1. 명성 입금 완료 (기간 지정 정산 모달 열기)
+    document.getElementById('resetMyeong').onclick = () => openSettlementModal('명성');
+
+    // 2. 음봉 입금 완료 (기간 지정 정산 모달 열기)
+    document.getElementById('resetEumbong').onclick = () => openSettlementModal('음봉');
 
     bindAutoSelectInput(document.getElementById('setRate'));
     bindAutoSelectInput(document.getElementById('setTruck'));
@@ -1672,7 +2144,7 @@ function show(name){
         };
       });
 
-      // 이름 / 단가 수정 시 실시간 반영 및 자동 저장
+      // 이름 / 단가 수정 시 메모리 반영 (단가 최종 확정 및 적용일 지정은 '품목/단가 저장' 버튼에서 처리)
       table.querySelectorAll('input[data-f]').forEach(inp => {
         inp.oninput = () => {
           const i = Number(inp.dataset.i);
@@ -1680,7 +2152,6 @@ function show(name){
           if (f === 'name') items[i].name = inp.value;
           if (f === 'm') items[i].myeongseong = num(inp.value);
           if (f === 'e') items[i].eumbong = num(inp.value);
-          saveJSON(KEYS.items, items);
         };
       });
     }
@@ -1694,8 +2165,55 @@ function show(name){
     };
 
     document.getElementById('saveItems').onclick = () => {
-      saveJSON(KEYS.items, items);
-      alert('품목/단가 저장 완료');
+      const item189 = items.find(x => x.name === '18.9L');
+      const eumbong189Rate = item189 ? num(item189.eumbong) : personalRate;
+      const showSync189 = item189 && (eumbong189Rate !== num(document.getElementById('setRate').value));
+
+      openEffectiveDateModal({
+        title: '품목/단가 저장',
+        desc: '변경한 품목 단가를 몇 월 며칠부터 반영할까요?',
+        syncOptionLabel: showSync189 ? `상단 '개인재고 18.9L 정산 단가'도 ${money(eumbong189Rate)}으로 함께 변경` : '',
+        onConfirm: (applyFrom, syncPersonal189) => {
+          const todayStr = todayISO();
+          saveJSON(KEYS.items, items);
+
+          if (applyFrom > todayStr) {
+            priceSchedule.items = {
+              applyFrom,
+              prevItems: { ...activeItemsPriceMapToday }
+            };
+          } else {
+            priceSchedule.items = null;
+          }
+
+          if (syncPersonal189 && item189) {
+            personalRate = eumbong189Rate;
+            document.getElementById('setRate').value = personalRate;
+            localStorage.setItem(KEYS.personalRate, String(personalRate));
+            if (applyFrom > todayStr) {
+              priceSchedule.personalRate = {
+                applyFrom,
+                prevRate: activePersonalRateToday,
+                newRate: personalRate
+              };
+            } else {
+              priceSchedule.personalRate = null;
+            }
+          }
+
+          saveJSON(KEYS.priceSchedule, priceSchedule);
+          refreshScheduleBanner();
+          if (applyFrom > todayStr) {
+            alert(`품목/단가 저장 완료!
+
+• 적용 시작일: ${applyFrom}부터 새 단가 반영
+• ${applyFrom} 이전 날짜의 전표에는 기존 단가가 자동 적용됩니다.`);
+          } else {
+            alert(`품목/단가 저장 완료!
+오늘(${todayStr})부터 즉시 새 단가가 적용됩니다.`);
+          }
+        }
+      });
     };
 
     // 백업
@@ -1707,6 +2225,8 @@ function show(name){
         myStock,
         containerHeld,
         settlement,
+        lastSettled,
+        priceSchedule,
         personalRate,
         truckSize
       };
@@ -1736,6 +2256,10 @@ function show(name){
           myStock = data.myStock || myStock;
           containerHeld = data.containerHeld || containerHeld;
           settlement = data.settlement || settlement;
+          lastSettled = data.lastSettled || lastSettled || { 명성:'', 음봉:'' };
+          priceSchedule = data.priceSchedule || { personalRate: null, items: null };
+          saveJSON(KEYS.lastSettled, lastSettled);
+          saveJSON(KEYS.priceSchedule, priceSchedule);
           personalRate = num(data.personalRate || personalRate);
           truckSize = num(data.truckSize || truckSize);
 
@@ -1760,7 +2284,7 @@ function show(name){
 
     document.getElementById('resetAll').onclick = () => {
       if (!confirm('⚠ 모든 데이터(출고/입고/정산/재고/설정)를 삭제합니다.\n\n정말 초기화할까요?')) return;
-      const keysToRemove = [KEYS.items, KEYS.outgo, KEYS.inbound, KEYS.myStock, KEYS.containerHeld, KEYS.settlement, KEYS.personalRate, KEYS.truckSize];
+      const keysToRemove = [KEYS.items, KEYS.outgo, KEYS.inbound, KEYS.myStock, KEYS.containerHeld, KEYS.settlement, KEYS.lastSettled, KEYS.priceSchedule, KEYS.personalRate, KEYS.truckSize];
       keysToRemove.forEach(k => localStorage.removeItem(k));
       // reset runtime state
       items = JSON.parse(JSON.stringify(DEFAULT_ITEMS));
@@ -1773,6 +2297,8 @@ function show(name){
         for (const t of CONTAINER_TYPES) containerHeld[wh][t.key] = 0;
       }
       settlement = { myeong:0, eumbong:0 };
+      lastSettled = { 명성:'', 음봉:'' };
+      priceSchedule = { personalRate: null, items: null };
       personalRate = 1800;
       truckSize = 864;
       syncHeader();
